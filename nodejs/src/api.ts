@@ -12,7 +12,7 @@ import { hostAllowed, bindAllowed, HOST_DENIED_MSG } from "./hosts.js";
 
 export const VERSION = "0.10.0";
 const SERVICE = "GnumarusPythonNativeOperationsHttpService";
-const OPEN_ROUTES = new Set(["/", "/api/help"]);
+const OPEN_ROUTES = new Set(["/", "/api/help", "/api/oauth2/callback"]);
 
 const SHELL_DEFAULT_TIMEOUT = 30;
 const SHELL_MAX_TIMEOUT = 300;
@@ -338,6 +338,13 @@ async function doGet(
       err(res, 400, "This route requires a WebSocket upgrade (Upgrade: websocket).");
       return;
     case "/api/sysinfo": handleSysinfo(res); return;
+    case "/api/oauth2/callback": await handleOAuth2Callback(req, res, query); return;
+    case "/api/oauth2/poll": handleOAuth2Poll(res, query); return;
+    case "/api/oauth2/start":
+    case "/api/oauth2/refresh":
+    case "/api/oauth2/close":
+      err(res, 405, "Method GET not supported for this route.");
+      return;
     default: err(res, 404, `Unknown route: ${pathname}`);
   }
 }
@@ -355,6 +362,13 @@ async function doPost(
     case "/api/socket/send": await handleSocketSend(req, res, query); return;
     case "/api/socket/close": handleSocketClose(res, query); return;
     case "/api/socket/starttls": await handleSocketStarttls(req, res, query); return;
+    case "/api/oauth2/start": await handleOAuth2Start(res, req, opts); return;
+    case "/api/oauth2/refresh": await handleOAuth2Refresh(res, query); return;
+    case "/api/oauth2/close": handleOAuth2Close(res, query); return;
+    case "/api/oauth2/callback":
+    case "/api/oauth2/poll":
+      err(res, 405, "Method POST not supported for this route.");
+      return;
     case "/":
     case "/api/help":
     case "/api/dir":
@@ -379,6 +393,7 @@ async function doPut(
     return;
   }
   if (["/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow", "/api/shell", "/api/sqlite/create",
+    "/api/oauth2/start", "/api/oauth2/callback", "/api/oauth2/poll", "/api/oauth2/refresh", "/api/oauth2/close",
     "/api/sqlite/query", "/api/sysinfo", "/api/socket/open",
     "/api/socket/send", "/api/socket/recv",
     "/api/socket/close", "/api/socket/starttls", "/api/socket/ws"].includes(pathname)) {
@@ -394,6 +409,11 @@ async function doDelete(
 ): Promise<void> {
   if (pathname === "/api/file") {
     handleDeleteFile(res, query, opts);
+    return;
+  }
+  if (pathname === "/api/oauth2/start" || pathname === "/api/oauth2/callback" || pathname === "/api/oauth2/poll" ||
+    pathname === "/api/oauth2/refresh" || pathname === "/api/oauth2/close") {
+    err(res, 405, "Method DELETE not supported for this route.");
     return;
   }
   if (pathname === "/api/dir") {
@@ -755,6 +775,299 @@ function handleDeleteDirShallow(res: http.ServerResponse, query: URLSearchParams
     err(res, 400, `Cannot delete directory: ${(e as Error).message}`, abs); return;
   }
   sendJson(res, 200, { path: raw, absolute_path: abs, deleted: jenc(true) });
+}
+
+// -- oauth2 --------------------------------------------------------------------
+
+interface OAuthSession {
+  clientID: string;
+  clientSecret: string;
+  authURL: string;
+  tokenURL: string;
+  scope: string;
+  redirectURI: string;
+  state: string;
+  codeVerifier: string;
+  status: string;
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+  scopeOut: string;
+  errText: string;
+  last: number;
+}
+
+const oauthSessions = new Map<string, OAuthSession>();
+let oauthSweeperStarted = false;
+function oauthEnsureSweeper(): void {
+  if (oauthSweeperStarted) return;
+  oauthSweeperStarted = true;
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, s] of oauthSessions) {
+      if (now - s.last > 600_000) oauthSessions.delete(id);
+    }
+  }, 60_000);
+}
+
+function oauthRandom(n: number): string {
+  return randomBytes(n).toString("base64url");
+}
+
+function oauthValidURL(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function oauthStr(obj: any, key: string): { v: string; ok: boolean; present: boolean } {
+  if (!(key in obj) || obj[key] === null) return { v: "", ok: true, present: false };
+  if (typeof obj[key] !== "string") return { v: "", ok: false, present: true };
+  return { v: obj[key] as string, ok: true, present: true };
+}
+
+async function oauthPostForm(tokenURL: string, form: Record<string, string>): Promise<{ tok: any; err: string | null }> {
+  const body = new URLSearchParams(form).toString();
+  try {
+    const resp = await fetch(tokenURL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+      body,
+      signal: AbortSignal.timeout(20_000),
+    });
+    const text = await resp.text();
+    let payload: any = {};
+    try { payload = JSON.parse(text); } catch { }
+    const get = (k: string) => (typeof payload[k] === "string" ? payload[k] : "");
+    if (resp.status !== 200) {
+      const msg = get("error_description") || get("error") || ("HTTP " + resp.status);
+      return { tok: null, err: msg };
+    }
+    const tok = {
+      access: get("access_token"),
+      refresh: get("refresh_token"),
+      tokenType: get("token_type"),
+      scope: get("scope"),
+      expires: (typeof payload["expires_in"] === "number") ? payload["expires_in"] : 0,
+    };
+    if (!tok.access) return { tok: null, err: "token response without an access_token" };
+    if (!tok.tokenType) tok.tokenType = "Bearer";
+    if (!tok.expires) tok.expires = 3600;
+    return { tok, err: null };
+  } catch (e: any) {
+    return { tok: null, err: String(e?.message ?? e) };
+  }
+}
+
+function oauthWritePage(res: http.ServerResponse, status: number, title: string, message: string): void {
+  const esc = (s: string) => s.replace(/</g, "&lt;");
+  const body = "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">" +
+    "<title>" + esc(title) + "</title></head>\n<body style=\"font-family:system-ui,sans-serif;padding:2rem;max-width:32rem\">\n" +
+    "<h1>" + esc(title) + "</h1>\n<p>" + esc(message) + "</p>\n" +
+    "<script>setTimeout(function(){try{window.close();}catch(e){}},900);</script>\n</body></html>\n";
+  cors(res);
+  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(body);
+}
+
+async function handleOAuth2Start(res: http.ServerResponse, req: http.IncomingMessage, opts: Opts): Promise<void> {
+  oauthEnsureSweeper();
+  const ctype = (req.headers["content-type"] as string) ?? "";
+  if (!ctype.includes("application/json")) {
+    err(res, 400, "Content-Type must be application/json with body { client_id, client_secret?, auth_url?, token_url?, scope? }.");
+    return;
+  }
+  let obj: any = {};
+  try {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const raw = Buffer.concat(chunks).toString("utf8");
+    if (raw.trim() !== "") obj = JSON.parse(raw);
+  } catch {
+    err(res, 400, "Invalid JSON body."); return;
+  }
+  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
+    err(res, 400, "JSON body must be an object."); return;
+  }
+  const ci = oauthStr(obj, "client_id");
+  if (!ci.ok) { err(res, 400, "Field 'client_id' must be a string."); return; }
+  const clientID = ci.v.trim();
+  if (clientID === "") { err(res, 400, "Missing or empty required field: client_id."); return; }
+  const cs = oauthStr(obj, "client_secret");
+  if (!cs.ok) { err(res, 400, "Field 'client_secret' must be a string."); return; }
+  const au = oauthStr(obj, "auth_url");
+  if (!au.ok) { err(res, 400, "Field 'auth_url' must be a string."); return; }
+  const tu = oauthStr(obj, "token_url");
+  if (!tu.ok) { err(res, 400, "Field 'token_url' must be a string."); return; }
+  const sc = oauthStr(obj, "scope");
+  if (!sc.ok) { err(res, 400, "Field 'scope' must be a string."); return; }
+  let authURL = au.v.trim();
+  let tokenURL = tu.v.trim();
+  let scope = sc.v.trim();
+  if (authURL === "") authURL = "https://accounts.google.com/o/oauth2/v2/auth";
+  if (tokenURL === "") tokenURL = "https://oauth2.googleapis.com/token";
+  if (scope === "") scope = "https://mail.google.com/";
+  if (!oauthValidURL(authURL)) { err(res, 400, "Field 'auth_url' must be an absolute http(s) URL."); return; }
+  if (!oauthValidURL(tokenURL)) { err(res, 400, "Field 'token_url' must be an absolute http(s) URL."); return; }
+
+  const host = (req.headers["host"] as string) ?? "";
+  const redirectURI = "http://" + host + "/api/oauth2/callback";
+  const state = oauthRandom(24);
+  const verifier = oauthRandom(32);
+  const challenge = createHash("sha256").update(verifier).digest().toString("base64url").replace(/=+$/, "");
+  const params = new URLSearchParams({
+    client_id: clientID,
+    redirect_uri: redirectURI,
+    response_type: "code",
+    scope,
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    access_type: "offline",
+    prompt: "consent",
+  });
+  const sep = authURL.includes("?") ? "&" : "?";
+  const full = authURL + sep + params.toString();
+
+  if (oauthSessions.size >= 64) {
+    err(res, 400, "Too many open OAuth sessions (64)."); return;
+  }
+  const id = randomBytes(16).toString("base64url");
+  const sess: OAuthSession = {
+    clientID, clientSecret: cs.v, authURL, tokenURL, scope,
+    redirectURI, state, codeVerifier: verifier,
+    status: "pending", accessToken: "", refreshToken: "",
+    tokenType: "", expiresIn: 0, scopeOut: "", errText: "", last: Date.now(),
+  };
+  oauthSessions.set(id, sess);
+  sendJson(res, 201, { id, auth_url: full, redirect_uri: redirectURI, scope });
+}
+
+function handleOAuth2Poll(res: http.ServerResponse, query: URLSearchParams): void {
+  const id = query.get("id") ?? "";
+  if (id === "") { errPath(res); return; }
+  const sess = oauthSessions.get(id);
+  if (!sess) { err(res, 404, "Unknown OAuth session: " + id); return; }
+  sess.last = Date.now();
+  const out: any = { id, status: sess.status };
+  if (sess.status === "authorized") {
+    out.access_token = sess.accessToken;
+    out.token_type = sess.tokenType;
+    out.expires_in = jenc(sess.expiresIn);
+    out.scope = sess.scopeOut;
+  } else if (sess.status === "error") {
+    out.error = sess.errText;
+  }
+  sendJson(res, 200, out);
+}
+
+async function handleOAuth2Refresh(res: http.ServerResponse, query: URLSearchParams): Promise<void> {
+  const id = query.get("id") ?? "";
+  if (id === "") { errPath(res); return; }
+  const sess = oauthSessions.get(id);
+  if (!sess) { err(res, 404, "Unknown OAuth session: " + id); return; }
+  sess.last = Date.now();
+  const rt = sess.refreshToken;
+  const status = sess.status;
+  if (!rt || status === "pending" || status === "exchanging") {
+    err(res, 400, "No refresh token for this session; authorize again."); return;
+  }
+  const form: Record<string, string> = {
+    grant_type: "refresh_token",
+    refresh_token: rt,
+    client_id: sess.clientID,
+  };
+  if (sess.clientSecret) form.client_secret = sess.clientSecret;
+  const { tok, err: e } = await oauthPostForm(sess.tokenURL, form);
+  if (e) { err(res, 400, "Token refresh failed: " + e); return; }
+  sess.accessToken = tok.access;
+  sess.tokenType = tok.tokenType;
+  sess.expiresIn = tok.expires;
+  if (tok.scope) sess.scopeOut = tok.scope;
+  sess.status = "authorized";
+  sess.errText = "";
+  sess.last = Date.now();
+  sendJson(res, 200, {
+    id, access_token: sess.accessToken, token_type: sess.tokenType,
+    expires_in: jenc(sess.expiresIn), scope: sess.scopeOut,
+  });
+}
+
+async function handleOAuth2Callback(req: http.IncomingMessage, res: http.ServerResponse, query: URLSearchParams): Promise<void> {
+  const state = query.get("state") ?? "";
+  const code = query.get("code") ?? "";
+  const errParam = query.get("error") ?? "";
+  const errDesc = query.get("error_description") ?? "";
+  let sess: OAuthSession | undefined;
+  for (const s of oauthSessions.values()) {
+    if (state && s.state === state) { sess = s; break; }
+  }
+  if (!sess) {
+    oauthWritePage(res, 400, "Authorization failed",
+      "Unknown or expired authorization request. Start the sign-in again from the app.");
+    return;
+  }
+  sess.last = Date.now();
+  if (errParam) {
+    const msg = "The provider reported: " + errParam + (errDesc ? " (" + errDesc + ")" : "");
+    sess.status = "error";
+    sess.errText = msg;
+    oauthWritePage(res, 400, "Authorization denied", msg);
+    return;
+  }
+  if (!code) {
+    sess.status = "error";
+    sess.errText = "authorization response without a code";
+    oauthWritePage(res, 400, "Authorization failed", "The provider did not return an authorization code.");
+    return;
+  }
+  const already = sess.status !== "pending";
+  if (already) {
+    oauthWritePage(res, 200, "Already processed", "This authorization request was already handled. You can close this window.");
+    return;
+  }
+  sess.status = "exchanging";
+  const clientID = sess.clientID;
+  const clientSecret = sess.clientSecret;
+  const tokenURL = sess.tokenURL;
+  const redirectURI = sess.redirectURI;
+  const verifier = sess.codeVerifier;
+  const form: Record<string, string> = {
+    grant_type: "authorization_code",
+    code,
+    client_id: clientID,
+    redirect_uri: redirectURI,
+    code_verifier: verifier,
+  };
+  if (clientSecret) form.client_secret = clientSecret;
+  const { tok, err: e } = await oauthPostForm(tokenURL, form);
+  if (e) {
+    sess.status = "error";
+    sess.errText = e;
+    oauthWritePage(res, 400, "Token exchange failed", e);
+    return;
+  }
+  sess.status = "authorized";
+  sess.accessToken = tok.access;
+  sess.refreshToken = tok.refresh;
+  sess.tokenType = tok.tokenType;
+  sess.expiresIn = tok.expires;
+  if (tok.scope) sess.scopeOut = tok.scope;
+  sess.errText = "";
+  oauthWritePage(res, 200, "Authorization complete", "You can close this window and return to the app.");
+}
+
+function handleOAuth2Close(res: http.ServerResponse, query: URLSearchParams): void {
+  const id = query.get("id") ?? "";
+  if (id === "") { errPath(res); return; }
+  const sess = oauthSessions.get(id);
+  if (!sess) { err(res, 404, "Unknown OAuth session: " + id); return; }
+  oauthSessions.delete(id);
+  sendJson(res, 200, { id, closed: jenc(true) });
 }
 
 // -- shell ---------------------------------------------------------------------
@@ -2320,6 +2633,26 @@ export const ROUTES: Route[] = [
       "Session id from socket_open.")],
     "101 Switching Protocols, then transparent bidirectional bytes (see description).",
     "400 not-an-upgrade / bad handshake / missing id / already attached, 404 unknown session, 405 wrong method."),
+  route("POST", "/api/oauth2/start", "oauth2_start",
+    "Create an OAuth 2.0 (Authorization Code + PKCE) session.",
+    [param("client_id", "body (JSON)", true, "string", "OAuth client id.")],
+    "201 JSON { id, auth_url, redirect_uri, scope }.",
+    "400 missing client_id."),
+  route("GET", "/api/oauth2/callback?code=<code>&state=<state>", "oauth2_callback",
+    "Loopback redirect target for OAuth consent.",
+    [], "200 HTML page.", "400 unknown state."),
+  route("GET", "/api/oauth2/poll?id=<id>", "oauth2_poll",
+    "Read the state of an OAuth session.",
+    [param("id", "query", true, "string", "Session id.")],
+    "200 JSON { id, status }.", "400 missing id, 404 unknown session."),
+  route("POST", "/api/oauth2/refresh?id=<id>", "oauth2_refresh",
+    "Request a fresh access token.",
+    [param("id", "query", true, "string", "Session id.")],
+    "200 JSON { id, access_token, token_type, expires_in, scope }.", "400 missing id."),
+  route("POST", "/api/oauth2/close?id=<id>", "oauth2_close",
+    "Drop an OAuth session.",
+    [param("id", "query", true, "string", "Session id.")],
+    "200 JSON { id, closed: true }.", "400 missing id."),
   route("GET", "/", "index",
     "Service index with version and pointer to /api/help.",
     [], "JSON { service, version, help }."),

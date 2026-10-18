@@ -4,7 +4,9 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.InetAddress
+import java.net.URL
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.net.URLDecoder
@@ -24,12 +26,14 @@ import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
 import java.sql.DriverManager
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import org.sqlite.SQLiteConfig
 
 const val VERSION = "0.10.0"
 const val SERVICE = "GnumarusPythonNativeOperationsHttpService"
-val OPEN_ROUTES = setOf("/", "/api/help")
+val OPEN_ROUTES = setOf("/", "/api/help", "/api/oauth2/callback")
+val oauthSessions = ConcurrentHashMap<String, MutableMap<String, Any?>>()
 val GSON = com.google.gson.GsonBuilder().serializeNulls().create()
 
 const val SHELL_DEFAULT_TIMEOUT = 30.0
@@ -150,6 +154,26 @@ fun buildRoutes(): JsonArray {
             "Absolute or relative path of the shallow directory to delete. ~/ expands to the server user's home directory.")),
         "200 JSON { path, absolute_path, deleted: true }.",
         "400 missing path / not-a-directory / not-shallow, 404 not found, 403 forbidden."))
+    r.add(routeEntry("POST", "/api/oauth2/start", "oauth2_start",
+        "Create an OAuth 2.0 session.",
+        listOf(param("client_id", "body (JSON)", true, "string", "OAuth client id.")),
+        "201 JSON { id, auth_url, redirect_uri, scope }.",
+        "400 missing client_id."))
+    r.add(routeEntry("GET", "/api/oauth2/callback?code=<code>&state=<state>", "oauth2_callback",
+        "Loopback redirect target for OAuth consent.", emptyList(),
+        "200 HTML page.", "400 unknown state."))
+    r.add(routeEntry("GET", "/api/oauth2/poll?id=<id>", "oauth2_poll",
+        "Read the state of an OAuth session.",
+        listOf(param("id", "query", true, "string", "Session id.")),
+        "200 JSON { id, status }.", "400 missing id, 404 unknown session."))
+    r.add(routeEntry("POST", "/api/oauth2/refresh?id=<id>", "oauth2_refresh",
+        "Request a fresh access token.",
+        listOf(param("id", "query", true, "string", "Session id.")),
+        "200 JSON { id, access_token, token_type, expires_in, scope }.", "400 missing id."))
+    r.add(routeEntry("POST", "/api/oauth2/close?id=<id>", "oauth2_close",
+        "Drop an OAuth session.",
+        listOf(param("id", "query", true, "string", "Session id.")),
+        "200 JSON { id, closed: true }.", "400 missing id."))
     r.add(routeEntry("POST", "/api/shell", "exec_shell",
         "Execute a bash command string (pipes, redirections and all bash syntax allowed) and return the exit code plus separately captured stdout and stderr. WARNING: this is arbitrary remote code execution on the host; the server binds localhost by default and relies on that for protection.",
         listOf(
@@ -1140,6 +1164,10 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             "/api/socket/recv" -> handleSocketRecv(ex, q)
             "/api/socket/ws" -> handleSocketWs(ex, q)
             "/api/sysinfo" -> handleSysinfo(ex)
+            "/api/oauth2/callback" -> handleOAuth2Callback(ex)
+            "/api/oauth2/poll" -> handleOAuth2Poll(ex)
+            "/api/oauth2/start", "/api/oauth2/refresh", "/api/oauth2/close" ->
+                err(ex, 405, "Method GET not supported for this route.")
             else -> err(ex, 404, "Unknown route: $path")
         }
     }
@@ -1156,6 +1184,11 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             "/api/socket/send" -> handleSocketSend(ex, q)
             "/api/socket/close" -> handleSocketClose(ex, q)
             "/api/socket/starttls" -> handleSocketStarttls(ex, q)
+            "/api/oauth2/start" -> handleOAuth2Start(ex)
+            "/api/oauth2/refresh" -> handleOAuth2Refresh(ex)
+            "/api/oauth2/close" -> handleOAuth2Close(ex)
+            "/api/oauth2/callback", "/api/oauth2/poll" ->
+                err(ex, 405, "Method POST not supported for this route.")
             "/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow",
             "/api/sysinfo", "/api/socket/recv", "/api/socket/ws" ->
                 err(ex, 405, "Method POST not supported for this route.")
@@ -1171,6 +1204,8 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             "/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow",
             "/api/shell", "/api/sqlite/create",
             "/api/sqlite/query", "/api/sysinfo",
+            "/api/oauth2/start", "/api/oauth2/callback", "/api/oauth2/poll",
+            "/api/oauth2/refresh", "/api/oauth2/close",
             "/api/socket/open", "/api/socket/send", "/api/socket/recv",
             "/api/socket/close", "/api/socket/starttls", "/api/socket/ws" ->
                 err(ex, 405, "Method PUT not supported for this route.")
@@ -1188,7 +1223,9 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             "/", "/api/help", "/api/shell", "/api/sqlite/create",
             "/api/sqlite/query", "/api/sysinfo",
             "/api/socket/open", "/api/socket/send", "/api/socket/recv",
-            "/api/socket/close", "/api/socket/starttls", "/api/socket/ws" ->
+            "/api/socket/close", "/api/socket/starttls", "/api/socket/ws",
+            "/api/oauth2/start", "/api/oauth2/callback", "/api/oauth2/poll",
+            "/api/oauth2/refresh", "/api/oauth2/close" ->
                 err(ex, 405, "Method DELETE not supported for this route.")
             else -> err(ex, 404, "Unknown route: $path")
         }
@@ -1937,6 +1974,268 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             err(ex, 400, "Cannot delete directory: ${e.message}", abs); return
         }
         sendJson(ex, 200, jo("path" to (q["path"] ?: ""), "absolute_path" to abs, "deleted" to jenc(true)))
+    }
+
+    private fun oauthValidUrl(raw: String): Boolean {
+        return try {
+            val u = java.net.URI(raw)
+            (u.scheme == "http" || u.scheme == "https") && u.host != null && u.host != ""
+        } catch (e: Exception) { false }
+    }
+
+    private fun oauthPostForm(tokenUrl: String, form: Map<String, String>): Pair<Map<String, Any?>?, String?> {
+        try {
+            val url = URL(tokenUrl)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.connectTimeout = 20000
+            conn.readTimeout = 20000
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            conn.setRequestProperty("Accept", "application/json")
+            val body = form.entries.joinToString("&") { (k, v) ->
+                java.net.URLEncoder.encode(k, "UTF-8") + "=" + java.net.URLEncoder.encode(v, "UTF-8")
+            }
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val status = conn.responseCode
+            val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader()?.readText() ?: ""
+            val payload = try { com.google.gson.JsonParser.parseString(if (text.isEmpty()) "{}" else text).asJsonObject } catch (e: Exception) { com.google.gson.JsonObject() }
+            fun get(k: String): String = if (payload.has(k) && !payload.get(k).isJsonNull) payload.get(k).asString else ""
+            if (status != 200) {
+                var msg = get("error_description")
+                if (msg == "") msg = get("error")
+                if (msg == "") msg = "HTTP $status"
+                return Pair(null, msg)
+            }
+            val tok = mutableMapOf<String, Any?>()
+            tok["access"] = get("access_token")
+            tok["refresh"] = get("refresh_token")
+            tok["token_type"] = get("token_type")
+            tok["scope"] = get("scope")
+            tok["expires"] = if (payload.has("expires_in")) payload.get("expires_in").asInt.toLong() else 0L
+            if (tok["access"] == "") return Pair(null, "token response without an access_token")
+            if (tok["token_type"] == "") tok["token_type"] = "Bearer"
+            if ((tok["expires"] as Long) == 0L) tok["expires"] = 3600L
+            return Pair(tok, null)
+        } catch (e: Exception) {
+            return Pair(null, e.message ?: "request failed")
+        }
+    }
+
+    private fun oauthWritePage(ex: Exchange, status: Int, title: String, message: String) {
+        val body = "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">" +
+            "<title>" + title.replace("<", "&lt;") + "</title></head>\n" +
+            "<body style=\"font-family:system-ui,sans-serif;padding:2rem;max-width:32rem\">\n" +
+            "<h1>" + title.replace("<", "&lt;") + "</h1>\n<p>" + message.replace("<", "&lt;") + "</p>\n" +
+            "<script>setTimeout(function(){try{window.close();}catch(e){}},900);</script>\n</body></html>\n"
+        // send raw html
+        val bytes = body.toByteArray(Charsets.UTF_8)
+        ex.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
+        ex.responseHeaders.add("Access-Control-Allow-Origin", "*")
+        ex.sendResponseHeaders(status, bytes.size.toLong())
+        ex.responseBody.use { it.write(bytes) }
+    }
+
+    fun handleOAuth2Start(ex: Exchange) {
+        val q = queryParams(ex)
+        val ct = ex.requestHeaders.getFirst("Content-Type") ?: ""
+        if (!ct.contains("application/json")) {
+            err(ex, 400, "Content-Type must be application/json with body { client_id, client_secret?, auth_url?, token_url?, scope? }.")
+            return
+        }
+        val obj = reqJson(ex) ?: return
+        fun getStr(key: String): Pair<String, Boolean> {
+            if (!obj.has(key) || obj.get(key).isJsonNull) return Pair("", true)
+            if (!obj.get(key).isJsonPrimitive || !obj.get(key).asJsonPrimitive.isString) return Pair("", false)
+            return Pair(obj.get(key).asString, true)
+        }
+        val (clientIdRaw, ok1) = getStr("client_id")
+        if (!ok1) { err(ex, 400, "Field 'client_id' must be a string."); return }
+        val clientId = clientIdRaw.trim()
+        if (clientId == "") { err(ex, 400, "Missing or empty required field: client_id."); return }
+        val (clientSecret, ok2) = getStr("client_secret")
+        if (!ok2) { err(ex, 400, "Field 'client_secret' must be a string."); return }
+        val (authUrlRaw, ok3) = getStr("auth_url")
+        if (!ok3) { err(ex, 400, "Field 'auth_url' must be a string."); return }
+        val (tokenUrlRaw, ok4) = getStr("token_url")
+        if (!ok4) { err(ex, 400, "Field 'token_url' must be a string."); return }
+        val (scopeRaw, ok5) = getStr("scope")
+        if (!ok5) { err(ex, 400, "Field 'scope' must be a string."); return }
+        var authUrl = authUrlRaw.trim()
+        var tokenUrl = tokenUrlRaw.trim()
+        var scope = scopeRaw.trim()
+        if (authUrl == "") authUrl = "https://accounts.google.com/o/oauth2/v2/auth"
+        if (tokenUrl == "") tokenUrl = "https://oauth2.googleapis.com/token"
+        if (scope == "") scope = "https://mail.google.com/"
+        if (!oauthValidUrl(authUrl)) { err(ex, 400, "Field 'auth_url' must be an absolute http(s) URL."); return }
+        if (!oauthValidUrl(tokenUrl)) { err(ex, 400, "Field 'token_url' must be an absolute http(s) URL."); return }
+
+        val host = ex.requestHeaders.getFirst("Host") ?: ""
+        val redirectUri = "http://$host/api/oauth2/callback"
+        val state = java.util.UUID.randomUUID().toString().replace("-", "") + java.util.UUID.randomUUID().toString().replace("-", "")
+        val verifier = java.util.UUID.randomUUID().toString().replace("-", "") + java.util.UUID.randomUUID().toString().replace("-", "")
+        val challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.UTF_8)))
+        val params = java.net.URLEncoder.encode("client_id", "UTF-8") + "=" + java.net.URLEncoder.encode(clientId, "UTF-8") +
+            "&redirect_uri=" + java.net.URLEncoder.encode(redirectUri, "UTF-8") +
+            "&response_type=code&scope=" + java.net.URLEncoder.encode(scope, "UTF-8") +
+            "&state=" + java.net.URLEncoder.encode(state, "UTF-8") +
+            "&code_challenge=" + java.net.URLEncoder.encode(challenge, "UTF-8") +
+            "&code_challenge_method=S256&access_type=offline&prompt=consent"
+        val sep = if (authUrl.contains("?")) "&" else "?"
+        val full = authUrl + sep + params
+
+        if (oauthSessions.size >= 64) { err(ex, 400, "Too many open OAuth sessions (64)."); return }
+        val id = java.util.UUID.randomUUID().toString()
+        val sess = mutableMapOf<String, Any?>()
+        sess["client_id"] = clientId
+        sess["client_secret"] = clientSecret
+        sess["auth_url"] = authUrl
+        sess["token_url"] = tokenUrl
+        sess["scope"] = scope
+        sess["redirect_uri"] = redirectUri
+        sess["state"] = state
+        sess["code_verifier"] = verifier
+        sess["status"] = "pending"
+        sess["access_token"] = ""
+        sess["refresh_token"] = ""
+        sess["token_type"] = ""
+        sess["expires_in"] = 0L
+        sess["scope_out"] = ""
+        sess["err_text"] = ""
+        sess["last"] = System.currentTimeMillis()
+        oauthSessions[id] = sess
+        sendJson(ex, 201, jo("id" to id, "auth_url" to full, "redirect_uri" to redirectUri, "scope" to scope))
+    }
+
+    fun handleOAuth2Poll(ex: Exchange) {
+        val q = queryParams(ex)
+        val id = q["id"] ?: ""
+        if (id == "") { err(ex, 400, "Missing required query parameter: id"); return }
+        val sess = oauthSessions[id]
+        if (sess == null) { err(ex, 404, "Unknown OAuth session: $id"); return }
+        sess["last"] = System.currentTimeMillis()
+        val out = mutableMapOf<String, Any?>()
+        out["id"] = id
+        out["status"] = sess["status"]
+        if (sess["status"] == "authorized") {
+            out["access_token"] = sess["access_token"]
+            out["token_type"] = sess["token_type"]
+            out["expires_in"] = jenc((sess["expires_in"] as Long))
+            out["scope"] = sess["scope_out"]
+        } else if (sess["status"] == "error") {
+            out["error"] = sess["err_text"]
+        }
+        sendJson(ex, 200, jo(*out.map { it.key to it.value }.toTypedArray()))
+    }
+
+    fun handleOAuth2Refresh(ex: Exchange) {
+        val q = queryParams(ex)
+        val id = q["id"] ?: ""
+        if (id == "") { err(ex, 400, "Missing required query parameter: id"); return }
+        val sess = oauthSessions[id]
+        if (sess == null) { err(ex, 404, "Unknown OAuth session: $id"); return }
+        sess["last"] = System.currentTimeMillis()
+        val rt = sess["refresh_token"] as String
+        val status = sess["status"] as String
+        if (rt == "" || status == "pending" || status == "exchanging") {
+            err(ex, 400, "No refresh token for this session; authorize again."); return
+        }
+        val form = mutableMapOf<String, String>()
+        form["grant_type"] = "refresh_token"
+        form["refresh_token"] = rt
+        form["client_id"] = sess["client_id"] as String
+        val cs = sess["client_secret"] as String
+        if (cs != "") form["client_secret"] = cs
+        val (tok, e) = oauthPostForm(sess["token_url"] as String, form)
+        if (e != null) { err(ex, 400, "Token refresh failed: $e"); return }
+        sess["access_token"] = tok!!["access"]
+        sess["token_type"] = tok["token_type"]
+        sess["expires_in"] = tok["expires"]
+        val sc = tok["scope"] as String
+        if (sc != "") sess["scope_out"] = sc
+        sess["status"] = "authorized"
+        sess["err_text"] = ""
+        sess["last"] = System.currentTimeMillis()
+        sendJson(ex, 200, jo("id" to id, "access_token" to sess["access_token"],
+            "token_type" to sess["token_type"], "expires_in" to jenc(sess["expires_in"] as Long),
+            "scope" to sess["scope_out"]))
+    }
+
+    fun handleOAuth2Close(ex: Exchange) {
+        val q = queryParams(ex)
+        val id = q["id"] ?: ""
+        if (id == "") { err(ex, 400, "Missing required query parameter: id"); return }
+        if (!oauthSessions.containsKey(id)) { err(ex, 404, "Unknown OAuth session: $id"); return }
+        oauthSessions.remove(id)
+        sendJson(ex, 200, jo("id" to id, "closed" to jenc(true)))
+    }
+
+    fun handleOAuth2Callback(ex: Exchange) {
+        val q = queryParams(ex)
+        val state = q["state"] ?: ""
+        val code = q["code"] ?: ""
+        val errParam = q["error"] ?: ""
+        val errDesc = q["error_description"] ?: ""
+        var sess: MutableMap<String, Any?>? = null
+        var sid: String? = null
+        for ((k, v) in oauthSessions) {
+            if (state != "" && v["state"] == state) { sess = v; sid = k; break }
+        }
+        if (sess == null) {
+            oauthWritePage(ex, 400, "Authorization failed",
+                "Unknown or expired authorization request. Start the sign-in again from the app.")
+            return
+        }
+        sess!!["last"] = System.currentTimeMillis()
+        if (errParam != "") {
+            val msg = "The provider reported: $errParam" + if (errDesc != "") " ($errDesc)" else ""
+            sess["status"] = "error"
+            sess["err_text"] = msg
+            oauthWritePage(ex, 400, "Authorization denied", msg)
+            return
+        }
+        if (code == "") {
+            sess["status"] = "error"
+            sess["err_text"] = "authorization response without a code"
+            oauthWritePage(ex, 400, "Authorization failed", "The provider did not return an authorization code.")
+            return
+        }
+        val already = sess["status"] != "pending"
+        if (already) {
+            oauthWritePage(ex, 200, "Already processed", "This authorization request was already handled. You can close this window.")
+            return
+        }
+        sess["status"] = "exchanging"
+        val clientId = sess["client_id"] as String
+        val clientSecret = sess["client_secret"] as String
+        val tokenUrl = sess["token_url"] as String
+        val redirectUri = sess["redirect_uri"] as String
+        val verifier = sess["code_verifier"] as String
+        val form = mutableMapOf<String, String>()
+        form["grant_type"] = "authorization_code"
+        form["code"] = code
+        form["client_id"] = clientId
+        form["redirect_uri"] = redirectUri
+        form["code_verifier"] = verifier
+        if (clientSecret != "") form["client_secret"] = clientSecret
+        val (tok, e) = oauthPostForm(tokenUrl, form)
+        if (e != null) {
+            sess["status"] = "error"
+            sess["err_text"] = e
+            oauthWritePage(ex, 400, "Token exchange failed", e)
+            return
+        }
+        sess["status"] = "authorized"
+        sess["access_token"] = tok!!["access"]
+        sess["refresh_token"] = tok["refresh"]
+        sess["token_type"] = tok["token_type"]
+        sess["expires_in"] = tok["expires"]
+        val sc = tok["scope"] as String
+        if (sc != "") sess["scope_out"] = sc
+        sess["err_text"] = ""
+        oauthWritePage(ex, 200, "Authorization complete", "You can close this window and return to the app.")
     }
 
     // -- shell --------------------------------------------------------------

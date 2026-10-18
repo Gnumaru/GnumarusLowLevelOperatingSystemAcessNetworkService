@@ -1,7 +1,7 @@
 """Route registry (single source of truth for /api/help).
 Paths that never require the API token."""
 
-OPEN_ROUTES = ("/", "/api/help")
+OPEN_ROUTES = ("/", "/api/help", "/api/oauth2/callback")
 
 
 ROUTES = [
@@ -98,6 +98,57 @@ ROUTES = [
                     "Content-Length headers.",
         "errors": "400 missing path / is-a-directory, 404 not found, "
                   "403 forbidden.",
+    },
+    {
+        "method": "POST",
+        "url": "/api/oauth2/start",
+        "name": "oauth2_start",
+        "description": "Create an OAuth 2.0 (Authorization Code + PKCE) session.",
+        "params": [
+            {"name": "client_id", "location": "body (JSON)", "required": "b:true",
+             "type": "string", "description": "OAuth client id."},
+        ],
+        "response": "201 JSON { id, auth_url, redirect_uri, scope }.",
+        "errors": "400 missing client_id.",
+    },
+    {
+        "method": "GET",
+        "url": "/api/oauth2/callback?code=<code>&state=<state>",
+        "name": "oauth2_callback",
+        "description": "Loopback redirect target for OAuth consent.",
+        "params": [],
+        "response": "200 HTML page.",
+        "errors": "400 unknown state.",
+    },
+    {
+        "method": "GET",
+        "url": "/api/oauth2/poll?id=<id>",
+        "name": "oauth2_poll",
+        "description": "Read the state of an OAuth session.",
+        "params": [{"name": "id", "location": "query", "required": "b:true",
+                    "type": "string", "description": "Session id."}],
+        "response": "200 JSON { id, status }.",
+        "errors": "400 missing id, 404 unknown session.",
+    },
+    {
+        "method": "POST",
+        "url": "/api/oauth2/refresh?id=<id>",
+        "name": "oauth2_refresh",
+        "description": "Request a fresh access token.",
+        "params": [{"name": "id", "location": "query", "required": "b:true",
+                    "type": "string", "description": "Session id."}],
+        "response": "200 JSON { id, access_token, token_type, expires_in, scope }.",
+        "errors": "400 missing id.",
+    },
+    {
+        "method": "POST",
+        "url": "/api/oauth2/close?id=<id>",
+        "name": "oauth2_close",
+        "description": "Drop an OAuth session.",
+        "params": [{"name": "id", "location": "query", "required": "b:true",
+                    "type": "string", "description": "Session id."}],
+        "response": "200 JSON { id, closed: true }.",
+        "errors": "400 missing id.",
     },
     {
         "method": "GET",

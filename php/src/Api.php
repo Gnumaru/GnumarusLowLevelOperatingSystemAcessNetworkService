@@ -3,7 +3,7 @@
 
 const G_VERSION = '0.10.0';
 const G_SERVICE = 'GnumarusPythonNativeOperationsHttpService';
-const G_OPEN_ROUTES = ['/', '/api/help'];
+const G_OPEN_ROUTES = ['/', '/api/help', '/api/oauth2/callback'];
 
 const G_SHELL_DEFAULT_TIMEOUT = 30;
 const G_SHELL_MAX_TIMEOUT = 300;
@@ -16,6 +16,9 @@ class GApi {
     public bool $authRequired;
     public string $authToken;
     public string $cwd;
+
+    /** @var array<string,array> */
+    private static array $oauthSessions = [];
 
     public function __construct(bool $authRequired, string $authToken) {
         $this->authRequired = $authRequired;
@@ -267,6 +270,14 @@ class GApi {
                     '(Upgrade: websocket).');
             case '/api/sysinfo':
                 return $this->handleSysinfo();
+            case '/api/oauth2/callback':
+                return $this->handleOAuth2Callback($req);
+            case '/api/oauth2/poll':
+                return $this->handleOAuth2Poll($req);
+            case '/api/oauth2/start':
+            case '/api/oauth2/refresh':
+            case '/api/oauth2/close':
+                return self::err(405, 'Method GET not supported for this route.');
             default:
                 return self::err(404, "Unknown route: $path");
         }
@@ -294,6 +305,16 @@ class GApi {
                 return $this->handleSocketClose($req);
             case '/api/socket/starttls':
                 return $this->handleSocketStarttls($req);
+            case '/api/oauth2/start':
+                return $this->handleOAuth2Start($req);
+            case '/api/oauth2/refresh':
+                return $this->handleOAuth2Refresh($req);
+            case '/api/oauth2/close':
+                return $this->handleOAuth2Close($req);
+            case '/api/oauth2/callback':
+            case '/api/oauth2/poll':
+                return self::err(405,
+                    'Method POST not supported for this route.');
             case '/':
             case '/api/help':
             case '/api/dir':
@@ -318,7 +339,9 @@ class GApi {
                 '/api/sqlite/create', '/api/sqlite/query', '/api/sysinfo',
                 '/api/socket/open', '/api/socket/send', '/api/socket/recv',
                 '/api/socket/close', '/api/socket/starttls',
-                '/api/socket/ws'], true)) {
+                '/api/socket/ws', '/api/oauth2/start', '/api/oauth2/callback',
+                '/api/oauth2/poll', '/api/oauth2/refresh',
+                '/api/oauth2/close'], true)) {
             return self::err(405, 'Method PUT not supported for this route.');
         }
         return self::err(404, "Unknown route: $path");
@@ -342,7 +365,9 @@ class GApi {
                 '/api/sqlite/create', '/api/sqlite/query', '/api/sysinfo',
                 '/api/socket/open', '/api/socket/send', '/api/socket/recv',
                 '/api/socket/close', '/api/socket/starttls',
-                '/api/socket/ws'], true)) {
+                '/api/socket/ws', '/api/oauth2/start', '/api/oauth2/callback',
+                '/api/oauth2/poll', '/api/oauth2/refresh',
+                '/api/oauth2/close'], true)) {
             return self::err(405,
                 'Method DELETE not supported for this route.');
         }
@@ -1282,6 +1307,288 @@ class GApi {
             'mac' => $mac === null ? 'null' : $mac]);
     }
 
+    // -- oauth2 -----------------------------------------------------------------
+
+    private function oauthValidUrl(string $raw): bool {
+        $u = parse_url($raw);
+        return is_array($u) && isset($u['scheme']) && in_array($u['scheme'], ['http', 'https'], true)
+            && isset($u['host']) && $u['host'] !== '';
+    }
+
+    private function oauthPostForm(string $tokenUrl, array $form): array {
+        // returns [tokenArray|null, errorString|null]
+        $ctx = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\n",
+            'content' => http_build_query($form),
+            'timeout' => 20,
+            'ignore_errors' => true,
+        ]]);
+        $body = @file_get_contents($tokenUrl, false, $ctx);
+        $status = 0;
+        if (isset($http_response_header)) {
+            foreach ($http_response_header as $h) {
+                if (preg_match('#^HTTP/\S+\s+(\d+)#', $h, $m)) { $status = (int)$m[1]; break; }
+            }
+        }
+        if ($body === false) {
+            return [null, 'request failed'];
+        }
+        $payload = json_decode($body, true);
+        if (!is_array($payload)) $payload = [];
+        $get = fn($k) => isset($payload[$k]) && is_string($payload[$k]) ? $payload[$k] : '';
+        if ($status !== 200) {
+            $msg = $get('error_description') ?: $get('error');
+            if ($msg === '') $msg = 'HTTP ' . $status;
+            return [null, $msg];
+        }
+        $tok = [
+            'access' => $get('access_token'),
+            'refresh' => $get('refresh_token'),
+            'token_type' => $get('token_type'),
+            'scope' => $get('scope'),
+            'expires' => (isset($payload['expires_in']) && is_numeric($payload['expires_in'])) ? (int)$payload['expires_in'] : 0,
+        ];
+        if ($tok['access'] === '') return [null, 'token response without an access_token'];
+        if ($tok['token_type'] === '') $tok['token_type'] = 'Bearer';
+        if ($tok['expires'] === 0) $tok['expires'] = 3600;
+        return [$tok, null];
+    }
+
+    private function oauthWritePage(int $status, string $title, string $message): GResponse {
+        $body = "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">" .
+            "<title>" . htmlspecialchars($title) . "</title></head>\n" .
+            "<body style=\"font-family:system-ui,sans-serif;padding:2rem;max-width:32rem\">\n" .
+            "<h1>" . htmlspecialchars($title) . "</h1>\n<p>" . htmlspecialchars($message) . "</p>\n" .
+            "<script>setTimeout(function(){try{window.close();}catch(e){}},900);</script>\n" .
+            "</body></html>\n";
+        $headers = GResponse::corsHeaders();
+        $headers[] = ['Content-Type', 'text/html; charset=utf-8'];
+        $headers[] = ['Content-Length', (string) strlen($body)];
+        return new GResponse($status, $headers, $body);
+    }
+
+    private function handleOAuth2Start(GRequest $req): GResponse {
+        $ctype = $req->header('Content-Type');
+        if (strpos($ctype, 'application/json') === false) {
+            return self::err(400, 'Content-Type must be application/json with body { client_id, client_secret?, auth_url?, token_url?, scope? }.');
+        }
+        $obj = json_decode($req->body, true);
+        if (!is_array($obj)) $obj = (trim($req->body) === '') ? [] : null;
+        if (!is_array($obj)) return self::err(400, 'Invalid JSON body.');
+        $getStr = function ($key) use ($obj) {
+            if (!array_key_exists($key, $obj) || $obj[$key] === null) return ['', true];
+            if (!is_string($obj[$key])) return ['', false];
+            return [$obj[$key], true];
+        };
+        [$client_id, $ok] = $getStr('client_id');
+        if (!$ok) return self::err(400, "Field 'client_id' must be a string.");
+        $client_id = trim($client_id);
+        if ($client_id === '') return self::err(400, 'Missing or empty required field: client_id.');
+        [$client_secret, $ok] = $getStr('client_secret');
+        if (!$ok) return self::err(400, "Field 'client_secret' must be a string.");
+        [$auth_url, $ok] = $getStr('auth_url');
+        if (!$ok) return self::err(400, "Field 'auth_url' must be a string.");
+        [$token_url, $ok] = $getStr('token_url');
+        if (!$ok) return self::err(400, "Field 'token_url' must be a string.");
+        [$scope, $ok] = $getStr('scope');
+        if (!$ok) return self::err(400, "Field 'scope' must be a string.");
+        $auth_url = trim($auth_url);
+        $token_url = trim($token_url);
+        $scope = trim($scope);
+        if ($auth_url === '') $auth_url = 'https://accounts.google.com/o/oauth2/v2/auth';
+        if ($token_url === '') $token_url = 'https://oauth2.googleapis.com/token';
+        if ($scope === '') $scope = 'https://mail.google.com/';
+        if (!$this->oauthValidUrl($auth_url)) return self::err(400, "Field 'auth_url' must be an absolute http(s) URL.");
+        if (!$this->oauthValidUrl($token_url)) return self::err(400, "Field 'token_url' must be an absolute http(s) URL.");
+
+        $host = $req->header('host') ?: ($_SERVER['HTTP_HOST'] ?? '');
+        $redirect_uri = 'http://' . $host . '/api/oauth2/callback';
+        $state = bin2hex(random_bytes(24));
+        $verifier = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+        $params = http_build_query([
+            'client_id' => $client_id,
+            'redirect_uri' => $redirect_uri,
+            'response_type' => 'code',
+            'scope' => $scope,
+            'state' => $state,
+            'code_challenge' => $challenge,
+            'code_challenge_method' => 'S256',
+            'access_type' => 'offline',
+            'prompt' => 'consent',
+        ]);
+        $sep = (strpos($auth_url, '?') !== false) ? '&' : '?';
+        $full = $auth_url . $sep . $params;
+
+        if (count(self::$oauthSessions) >= 64) {
+            return self::err(400, 'Too many open OAuth sessions (64).');
+        }
+        $id = bin2hex(random_bytes(16));
+        self::$oauthSessions[$id] = [
+            'client_id' => $client_id,
+            'client_secret' => $client_secret,
+            'auth_url' => $auth_url,
+            'token_url' => $token_url,
+            'scope' => $scope,
+            'redirect_uri' => $redirect_uri,
+            'state' => $state,
+            'code_verifier' => $verifier,
+            'status' => 'pending',
+            'access_token' => '',
+            'refresh_token' => '',
+            'token_type' => '',
+            'expires_in' => 0,
+            'scope_out' => '',
+            'err_text' => '',
+            'last' => time(),
+        ];
+        return GResponse::json(201, ['id' => $id, 'auth_url' => $full,
+            'redirect_uri' => $redirect_uri, 'scope' => $scope]);
+    }
+
+    private function handleOAuth2Poll(GRequest $req): GResponse {
+        $query = $req->query;
+        if (!isset($query['id']) || $query['id'] === '') {
+            return self::err(400, 'Missing required query parameter: id');
+        }
+        $id = $query['id'];
+        if (!isset(self::$oauthSessions[$id])) {
+            return self::err(404, 'Unknown OAuth session: ' . $id);
+        }
+        $sess = &self::$oauthSessions[$id];
+        $sess['last'] = time();
+        $out = ['id' => $id, 'status' => $sess['status']];
+        if ($sess['status'] === 'authorized') {
+            $out['access_token'] = $sess['access_token'];
+            $out['token_type'] = $sess['token_type'];
+            $out['expires_in'] = self::jenc($sess['expires_in']);
+            $out['scope'] = $sess['scope_out'];
+        } elseif ($sess['status'] === 'error') {
+            $out['error'] = $sess['err_text'];
+        }
+        return GResponse::json(200, $out);
+    }
+
+    private function handleOAuth2Refresh(GRequest $req): GResponse {
+        $query = $req->query;
+        if (!isset($query['id']) || $query['id'] === '') {
+            return self::err(400, 'Missing required query parameter: id');
+        }
+        $id = $query['id'];
+        if (!isset(self::$oauthSessions[$id])) {
+            return self::err(404, 'Unknown OAuth session: ' . $id);
+        }
+        $sess = &self::$oauthSessions[$id];
+        $sess['last'] = time();
+        $rt = $sess['refresh_token'];
+        $status = $sess['status'];
+        if ($rt === '' || $status === 'pending' || $status === 'exchanging') {
+            return self::err(400, 'No refresh token for this session; authorize again.');
+        }
+        $form = [
+            'grant_type' => 'refresh_token',
+            'refresh_token' => $rt,
+            'client_id' => $sess['client_id'],
+        ];
+        if ($sess['client_secret'] !== '') $form['client_secret'] = $sess['client_secret'];
+        [$tok, $err] = $this->oauthPostForm($sess['token_url'], $form);
+        if ($err !== null) return self::err(400, 'Token refresh failed: ' . $err);
+        $sess['access_token'] = $tok['access'];
+        $sess['token_type'] = $tok['token_type'];
+        $sess['expires_in'] = $tok['expires'];
+        if ($tok['scope'] !== '') $sess['scope_out'] = $tok['scope'];
+        $sess['status'] = 'authorized';
+        $sess['err_text'] = '';
+        $sess['last'] = time();
+        return GResponse::json(200, [
+            'id' => $id, 'access_token' => $sess['access_token'],
+            'token_type' => $sess['token_type'],
+            'expires_in' => self::jenc($sess['expires_in']),
+            'scope' => $sess['scope_out'],
+        ]);
+    }
+
+    private function handleOAuth2Close(GRequest $req): GResponse {
+        $query = $req->query;
+        if (!isset($query['id']) || $query['id'] === '') {
+            return self::err(400, 'Missing required query parameter: id');
+        }
+        $id = $query['id'];
+        if (!isset(self::$oauthSessions[$id])) {
+            return self::err(404, 'Unknown OAuth session: ' . $id);
+        }
+        unset(self::$oauthSessions[$id]);
+        return GResponse::json(200, ['id' => $id, 'closed' => self::jenc(true)]);
+    }
+
+    private function handleOAuth2Callback(GRequest $req): GResponse {
+        $query = $req->query;
+        $state = $query['state'] ?? '';
+        $code = $query['code'] ?? '';
+        $errParam = $query['error'] ?? '';
+        $errDesc = $query['error_description'] ?? '';
+
+        $sess = null;
+        $sid = null;
+        foreach (self::$oauthSessions as $k => $s) {
+            if ($state !== '' && $s['state'] === $state) { $sess = $s; $sid = $k; break; }
+        }
+        if ($sess === null) {
+            return $this->oauthWritePage(400, 'Authorization failed',
+                'Unknown or expired authorization request. Start the sign-in again from the app.');
+        }
+        self::$oauthSessions[$sid]['last'] = time();
+        if ($errParam !== '') {
+            $msg = 'The provider reported: ' . $errParam;
+            if ($errDesc !== '') $msg .= ' (' . $errDesc . ')';
+            self::$oauthSessions[$sid]['status'] = 'error';
+            self::$oauthSessions[$sid]['err_text'] = $msg;
+            return $this->oauthWritePage(400, 'Authorization denied', $msg);
+        }
+        if ($code === '') {
+            self::$oauthSessions[$sid]['status'] = 'error';
+            self::$oauthSessions[$sid]['err_text'] = 'authorization response without a code';
+            return $this->oauthWritePage(400, 'Authorization failed',
+                'The provider did not return an authorization code.');
+        }
+        $already = self::$oauthSessions[$sid]['status'] !== 'pending';
+        if ($already) {
+            return $this->oauthWritePage(200, 'Already processed',
+                'This authorization request was already handled. You can close this window.');
+        }
+        self::$oauthSessions[$sid]['status'] = 'exchanging';
+        $client_id = self::$oauthSessions[$sid]['client_id'];
+        $client_secret = self::$oauthSessions[$sid]['client_secret'];
+        $token_url = self::$oauthSessions[$sid]['token_url'];
+        $redirect_uri = self::$oauthSessions[$sid]['redirect_uri'];
+        $verifier = self::$oauthSessions[$sid]['code_verifier'];
+
+        $form = [
+            'grant_type' => 'authorization_code',
+            'code' => $code,
+            'client_id' => $client_id,
+            'redirect_uri' => $redirect_uri,
+            'code_verifier' => $verifier,
+        ];
+        if ($client_secret !== '') $form['client_secret'] = $client_secret;
+        [$tok, $err] = $this->oauthPostForm($token_url, $form);
+        if ($err !== null) {
+            self::$oauthSessions[$sid]['status'] = 'error';
+            self::$oauthSessions[$sid]['err_text'] = $err;
+            return $this->oauthWritePage(400, 'Token exchange failed', $err);
+        }
+        self::$oauthSessions[$sid]['status'] = 'authorized';
+        self::$oauthSessions[$sid]['access_token'] = $tok['access'];
+        self::$oauthSessions[$sid]['refresh_token'] = $tok['refresh'];
+        self::$oauthSessions[$sid]['token_type'] = $tok['token_type'];
+        self::$oauthSessions[$sid]['expires_in'] = $tok['expires'];
+        if ($tok['scope'] !== '') self::$oauthSessions[$sid]['scope_out'] = $tok['scope'];
+        self::$oauthSessions[$sid]['err_text'] = '';
+        return $this->oauthWritePage(200, 'Authorization complete',
+            'You can close this window and return to the app.');
+    }
+
     // -- route catalog ----------------------------------------------------------
 
     private static function paramP(string $name, string $location, bool $required,
@@ -1365,6 +1672,22 @@ class GApi {
                     'Absolute or relative path of the shallow directory to delete. ~/ expands to the server user\'s home directory.')],
                 '200 JSON { path, absolute_path, deleted: true }.',
                 '400 missing path / not-a-directory / not-shallow, 404 not found, 403 forbidden.'),
+            self::routeE('POST', '/api/oauth2/start', 'oauth2_start',
+                'Create an OAuth 2.0 session.', [],
+                '201 JSON { id, auth_url, redirect_uri, scope }.',
+                '400 missing client_id.'),
+            self::routeE('GET', '/api/oauth2/callback?code=<code>&state=<state>', 'oauth2_callback',
+                'Loopback redirect target for OAuth consent.', [],
+                '200 HTML page.', '400 unknown state.'),
+            self::routeE('GET', '/api/oauth2/poll?id=<id>', 'oauth2_poll',
+                'Read the state of an OAuth session.', [self::paramP('id', 'query', true, 'string', 'Session id.')],
+                '200 JSON { id, status }.', '400 missing id, 404 unknown session.'),
+            self::routeE('POST', '/api/oauth2/refresh?id=<id>', 'oauth2_refresh',
+                'Request a fresh access token.', [self::paramP('id', 'query', true, 'string', 'Session id.')],
+                '200 JSON { id, access_token, token_type, expires_in, scope }.', '400 missing id.'),
+            self::routeE('POST', '/api/oauth2/close?id=<id>', 'oauth2_close',
+                'Drop an OAuth session.', [self::paramP('id', 'query', true, 'string', 'Session id.')],
+                '200 JSON { id, closed: true }.', '400 missing id.'),
             self::routeE('POST', '/api/shell', 'exec_shell',
                 'Execute a bash command string (pipes, redirections and all bash syntax allowed) and return the exit code plus separately captured stdout and stderr. WARNING: this is arbitrary remote code execution on the host; the server binds localhost by default and relies on that for protection.',
                 [self::paramP('command', 'body (JSON)', true, 'string',

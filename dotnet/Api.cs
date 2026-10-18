@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -9,9 +11,10 @@ using Microsoft.Data.Sqlite;
 /// <summary>HTTP API implementation (HttpListener front controller).</summary>
 static class Api
 {
+    private static readonly ConcurrentDictionary<string, Dictionary<string, object?>> oauthSessions = new();
     public const string VERSION = "0.10.0";
     public const string SERVICE = "GnumarusPythonNativeOperationsHttpService";
-    public static readonly string[] OPEN_ROUTES = ["/", "/api/help"];
+    public static readonly string[] OPEN_ROUTES = ["/", "/api/help", "/api/oauth2/callback"];
 
     public const double SHELL_DEFAULT_TIMEOUT = 30;
     public const double SHELL_MAX_TIMEOUT = 300;
@@ -408,6 +411,12 @@ static class Api
                 await Err(res, 400, "This route requires a WebSocket upgrade (Upgrade: websocket).");
                 return;
             case "/api/sysinfo": await HandleSysinfo(res); return;
+            case "/api/oauth2/callback": await HandleOAuth2Callback(req, res, st); return;
+            case "/api/oauth2/poll": await HandleOAuth2Poll(req, res, st); return;
+            case "/api/oauth2/start":
+            case "/api/oauth2/refresh":
+            case "/api/oauth2/close":
+                await Err(res, 405, "Method GET not supported for this route."); return;
             default: await Err(res, 404, $"Unknown route: {path}"); return;
         }
     }
@@ -425,6 +434,12 @@ static class Api
             case "/api/socket/send": await HandleSocketSend(req, res); return;
             case "/api/socket/close": await HandleSocketClose(req, res); return;
             case "/api/socket/starttls": await HandleSocketStarttls(req, res); return;
+            case "/api/oauth2/start": await HandleOAuth2Start(req, res, st); return;
+            case "/api/oauth2/refresh": await HandleOAuth2Refresh(req, res, st); return;
+            case "/api/oauth2/close": await HandleOAuth2Close(req, res, st); return;
+            case "/api/oauth2/callback":
+            case "/api/oauth2/poll":
+                await Err(res, 405, "Method POST not supported for this route."); return;
             case "/":
             case "/api/help":
             case "/api/dir":
@@ -449,6 +464,7 @@ static class Api
             return;
         }
         string[] known = ["/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow", "/api/shell",
+            "/api/oauth2/start", "/api/oauth2/callback", "/api/oauth2/poll", "/api/oauth2/refresh", "/api/oauth2/close",
             "/api/sqlite/create", "/api/sqlite/query", "/api/sysinfo",
             "/api/socket/open", "/api/socket/send", "/api/socket/recv",
             "/api/socket/close", "/api/socket/starttls", "/api/socket/ws"];
@@ -481,7 +497,9 @@ static class Api
         string[] known = ["/", "/api/help", "/api/shell",
             "/api/sqlite/create", "/api/sqlite/query", "/api/sysinfo",
             "/api/socket/open", "/api/socket/send", "/api/socket/recv",
-            "/api/socket/close", "/api/socket/starttls", "/api/socket/ws"];
+            "/api/socket/close", "/api/socket/starttls", "/api/socket/ws",
+            "/api/oauth2/start", "/api/oauth2/callback", "/api/oauth2/poll",
+            "/api/oauth2/refresh", "/api/oauth2/close"];
         if (known.Contains(path))
         {
             await Err(res, 405, "Method DELETE not supported for this route.");
@@ -1144,6 +1162,313 @@ static class Api
         {
             ["path"] = raw, ["absolute_path"] = abs, ["deleted"] = Tags.Enc(true),
         });
+    }
+
+    private static bool OAuthValidUrl(string raw)
+    {
+        try
+        {
+            var u = new Uri(raw);
+            return (u.Scheme == "http" || u.Scheme == "https") && !string.IsNullOrEmpty(u.Host);
+        }
+        catch { return false; }
+    }
+
+    private static async Task<(Dictionary<string, object?>? tok, string? err)> OAuthPostForm(
+        string tokenUrl, Dictionary<string, string> form)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            var content = new FormUrlEncodedContent(form);
+            var resp = await client.PostAsync(tokenUrl, content);
+            var body = await resp.Content.ReadAsStringAsync();
+
+            Dictionary<string, object?> payload;
+            try { payload = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(body) ?? new(); }
+            catch { payload = new(); }
+            string get(string k) => payload.TryGetValue(k, out var v) ? (v is string s ? s : (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.String ? je.GetString() ?? "" : "")) : "";
+            if (!resp.IsSuccessStatusCode)
+            {
+                var msg = get("error_description");
+                if (msg == "") msg = get("error");
+                if (msg == "") msg = $"HTTP {(int)resp.StatusCode}";
+                return (null, msg);
+            }
+            var tok = new Dictionary<string, object?>();
+            tok["access"] = get("access_token");
+            tok["refresh"] = get("refresh_token");
+            tok["token_type"] = get("token_type");
+            tok["scope"] = get("scope");
+            long _exp = 0;
+            if (payload.TryGetValue("expires_in", out var ei))
+            {
+                if (ei is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number)
+                    _exp = je.GetInt64();
+                else if (ei is int i) _exp = i;
+                else if (ei is long l) _exp = l;
+                else if (ei is double d) _exp = (long)d;
+            }
+            tok["expires"] = (int)_exp;
+
+            if ((string)tok["access"]! == "") return (null, "token response without an access_token");
+            if ((string)tok["token_type"]! == "") { } else tok["token_type"] = "Bearer";
+            if ((int)tok["expires"] == 0) tok["expires"] = 3600;
+            return (tok, null);
+        }
+        catch (Exception e) { return (null, e.Message); }
+    }
+
+    private static void OAuthWritePage(HttpListenerResponse res, int status, string title, string message)
+    {
+        var body = "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">" +
+            "<title>" + System.Net.WebUtility.HtmlEncode(title) + "</title></head>\n" +
+            "<body style=\"font-family:system-ui,sans-serif;padding:2rem;max-width:32rem\">\n" +
+            "<h1>" + System.Net.WebUtility.HtmlEncode(title) + "</h1>\n<p>" + System.Net.WebUtility.HtmlEncode(message) + "</p>\n" +
+            "<script>setTimeout(function(){try{window.close();}catch(e){}},900);</script>\n</body></html>\n";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(body);
+        res.Headers.Add("Content-Type", "text/html; charset=utf-8");
+        Cors(res);
+        res.StatusCode = status;
+        res.ContentLength64 = bytes.Length;
+        res.OutputStream.Write(bytes, 0, bytes.Length);
+        res.OutputStream.Close();
+    }
+
+    private static async Task HandleOAuth2Start(HttpListenerRequest req, HttpListenerResponse res, State st)
+    {
+        var ct = req.ContentType ?? "";
+        if (!ct.Contains("application/json"))
+        {
+            await Err(res, 400, "Content-Type must be application/json with body { client_id, client_secret?, auth_url?, token_url?, scope? }.");
+            return;
+        }
+        var bodyBytes = await ReadBody(req);
+        Dictionary<string, object?>? obj;
+        try
+        {
+            if (bodyBytes.Length == 0) obj = new();
+            else obj = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(bodyBytes);
+        }
+        catch { await Err(res, 400, "Invalid JSON body."); return; }
+        if (obj == null) { await Err(res, 400, "JSON body must be an object."); return; }
+
+        string getStr(string key, out bool ok)
+        {
+            ok = true;
+            if (!obj.ContainsKey(key) || obj[key] == null) return "";
+            if (obj[key] is string s) return s;
+            if (obj[key] is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.String)
+                return je.GetString() ?? "";
+            ok = false;
+            return "";
+        }
+
+        var clientIdRaw = getStr("client_id", out var ok1);
+        if (!ok1) { await Err(res, 400, "Field 'client_id' must be a string."); return; }
+        var clientId = clientIdRaw.Trim();
+        if (clientId == "") { await Err(res, 400, "Missing or empty required field: client_id."); return; }
+        var clientSecret = getStr("client_secret", out var ok2);
+        if (!ok2) { await Err(res, 400, "Field 'client_secret' must be a string."); return; }
+        var authUrlRaw = getStr("auth_url", out var ok3);
+        if (!ok3) { await Err(res, 400, "Field 'auth_url' must be a string."); return; }
+        var tokenUrlRaw = getStr("token_url", out var ok4);
+        if (!ok4) { await Err(res, 400, "Field 'token_url' must be a string."); return; }
+        var scopeRaw = getStr("scope", out var ok5);
+        if (!ok5) { await Err(res, 400, "Field 'scope' must be a string."); return; }
+        var authUrl = authUrlRaw.Trim();
+        var tokenUrl = tokenUrlRaw.Trim();
+        var scope = scopeRaw.Trim();
+        if (authUrl == "") authUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+        if (tokenUrl == "") tokenUrl = "https://oauth2.googleapis.com/token";
+        if (scope == "") scope = "https://mail.google.com/";
+        if (!OAuthValidUrl(authUrl)) { await Err(res, 400, "Field 'auth_url' must be an absolute http(s) URL."); return; }
+        if (!OAuthValidUrl(tokenUrl)) { await Err(res, 400, "Field 'token_url' must be an absolute http(s) URL."); return; }
+
+        var host = ReqHost(req);
+        var redirectUri = "http://" + host + "/api/oauth2/callback";
+        var state = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+        var verifier = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+        var challenge = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier))).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+        var vals = new Dictionary<string, string> {
+            ["client_id"] = clientId,
+            ["redirect_uri"] = redirectUri,
+            ["response_type"] = "code",
+            ["scope"] = scope,
+            ["state"] = state,
+            ["code_challenge"] = challenge,
+            ["code_challenge_method"] = "S256",
+            ["access_type"] = "offline",
+            ["prompt"] = "consent",
+        };
+        var sep = authUrl.Contains("?") ? "&" : "?";
+        var full = authUrl + sep + string.Join("&", vals.Select(kv => Uri.EscapeDataString(kv.Key) + "=" + Uri.EscapeDataString(kv.Value)));
+
+        if (oauthSessions.Count >= 64) { await Err(res, 400, "Too many open OAuth sessions (64)."); return; }
+        var id = Guid.NewGuid().ToString();
+        var sess = new Dictionary<string, object?>();
+        sess["client_id"] = clientId;
+        sess["client_secret"] = clientSecret;
+        sess["auth_url"] = authUrl;
+        sess["token_url"] = tokenUrl;
+        sess["scope"] = scope;
+        sess["redirect_uri"] = redirectUri;
+        sess["state"] = state;
+        sess["code_verifier"] = verifier;
+        sess["status"] = "pending";
+        sess["access_token"] = "";
+        sess["refresh_token"] = "";
+        sess["token_type"] = "";
+        sess["expires_in"] = 0;
+        sess["scope_out"] = "";
+        sess["err_text"] = "";
+        sess["last"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        oauthSessions[id] = sess;
+        await SendJson(res, 201, new Dictionary<string, object?> {
+            ["id"] = id, ["auth_url"] = full, ["redirect_uri"] = redirectUri, ["scope"] = scope,
+        });
+    }
+
+    private static async Task HandleOAuth2Poll(HttpListenerRequest req, HttpListenerResponse res, State st)
+    {
+        var raw = req.QueryString["id"] ?? "";
+        if (raw == "") { await Err(res, 400, "Missing required query parameter: id"); return; }
+        if (!oauthSessions.TryGetValue(raw, out var sess)) { await Err(res, 404, "Unknown OAuth session: " + raw); return; }
+        sess["last"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var result = new Dictionary<string, object?> { ["id"] = raw, ["status"] = sess["status"] };
+        var _st = (string)sess["status"]!;
+        if (_st == "authorized")
+        {
+            result["access_token"] = sess["access_token"];
+            result["token_type"] = sess["token_type"];
+            result["expires_in"] = Tags.Enc(Convert.ToInt64(sess["expires_in"]));
+            result["scope"] = sess["scope_out"];
+        }
+        else if (_st == "error")
+        {
+            result["error"] = sess["err_text"];
+        }
+        await SendJson(res, 200, result);
+    }
+
+    private static async Task HandleOAuth2Refresh(HttpListenerRequest req, HttpListenerResponse res, State st)
+    {
+        var raw = req.QueryString["id"] ?? "";
+        if (raw == "") { await Err(res, 400, "Missing required query parameter: id"); return; }
+        if (!oauthSessions.TryGetValue(raw, out var sess)) { await Err(res, 404, "Unknown OAuth session: " + raw); return; }
+        sess["last"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var rt = (string)sess["refresh_token"]!;
+        var status = (string)sess["status"]!;
+        if (rt == "" || status == "pending" || status == "exchanging")
+        {
+            await Err(res, 400, "No refresh token for this session; authorize again."); return;
+        }
+        var form = new Dictionary<string, string> {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = rt,
+            ["client_id"] = (string)sess["client_id"]!,
+        };
+        var cs = (string)sess["client_secret"]!;
+        if (cs != "") form["client_secret"] = cs;
+        var (tok, e) = await OAuthPostForm((string)sess["token_url"]!, form);
+        if (e != null) { await Err(res, 400, "Token refresh failed: " + e); return; }
+        sess["access_token"] = tok!["access"];
+        sess["token_type"] = tok!["token_type"];
+        sess["expires_in"] = tok!["expires"];
+        var sc = (string)tok!["scope"]!;
+        if (sc != "") sess["scope_out"] = sc;
+        sess["status"] = "authorized";
+        sess["err_text"] = "";
+        sess["last"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        await SendJson(res, 200, new Dictionary<string, object?> {
+            ["id"] = raw,
+            ["access_token"] = sess["access_token"],
+            ["token_type"] = sess["token_type"],
+            ["expires_in"] = Tags.Enc(Convert.ToInt64(sess["expires_in"])),
+            ["scope"] = sess["scope_out"],
+        });
+    }
+
+    private static async Task HandleOAuth2Close(HttpListenerRequest req, HttpListenerResponse res, State st)
+    {
+        var raw = req.QueryString["id"] ?? "";
+        if (raw == "") { await Err(res, 400, "Missing required query parameter: id"); return; }
+        if (!oauthSessions.ContainsKey(raw)) { await Err(res, 404, "Unknown OAuth session: " + raw); return; }
+        oauthSessions.TryRemove(raw, out _);
+        await SendJson(res, 200, new Dictionary<string, object?> { ["id"] = raw, ["closed"] = Tags.Enc(true) });
+    }
+
+    private static async Task HandleOAuth2Callback(HttpListenerRequest req, HttpListenerResponse res, State st)
+    {
+        var state = req.QueryString["state"] ?? "";
+        var code = req.QueryString["code"] ?? "";
+        var errParam = req.QueryString["error"] ?? "";
+        var errDesc = req.QueryString["error_description"] ?? "";
+        string? sid = null;
+        Dictionary<string, object?>? sess = null;
+        foreach (var kv in oauthSessions)
+        {
+            if (state != "" && (string)kv.Value["state"]! == state) { sid = kv.Key; sess = kv.Value; break; }
+        }
+        if (sess == null)
+        {
+            OAuthWritePage(res, 400, "Authorization failed", "Unknown or expired authorization request. Start the sign-in again from the app.");
+            return;
+        }
+        sess!["last"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (errParam != "")
+        {
+            var msg = "The provider reported: " + errParam + (errDesc != "" ? " (" + errDesc + ")" : "");
+            sess!["status"] = "error";
+            sess!["err_text"] = msg;
+            OAuthWritePage(res, 400, "Authorization denied", msg);
+            return;
+        }
+        if (code == "")
+        {
+            sess!["status"] = "error";
+            sess!["err_text"] = "authorization response without a code";
+            OAuthWritePage(res, 400, "Authorization failed", "The provider did not return an authorization code.");
+            return;
+        }
+        var already = (string)sess!["status"]! != "pending";
+        if (already)
+        {
+            OAuthWritePage(res, 200, "Already processed", "This authorization request was already handled. You can close this window.");
+            return;
+        }
+        sess!["status"] = "exchanging";
+        var clientId = (string)sess!["client_id"]!;
+        var clientSecret = (string)sess!["client_secret"]!;
+        var tokenUrl = (string)sess!["token_url"]!;
+        var redirectUri = (string)sess!["redirect_uri"]!;
+        var verifier = (string)sess!["code_verifier"]!;
+        var form = new Dictionary<string, string> {
+            ["grant_type"] = "authorization_code",
+            ["code"] = code,
+            ["client_id"] = clientId,
+            ["redirect_uri"] = redirectUri,
+            ["code_verifier"] = verifier,
+        };
+        if (clientSecret != "") form["client_secret"] = clientSecret;
+        var (tok, e) = await OAuthPostForm(tokenUrl, form);
+
+        if (e != null)
+        {
+            sess!["status"] = "error";
+            sess!["err_text"] = e;
+            OAuthWritePage(res, 400, "Token exchange failed", e);
+            return;
+        }
+        sess!["status"] = "authorized";
+        sess!["access_token"] = tok!["access"]!;
+        sess!["refresh_token"] = tok!["refresh"]!;
+        sess!["token_type"] = tok!["token_type"]!;
+        sess!["expires_in"] = tok!["expires"]!;
+        var sc = (string)tok!["scope"]!;
+        if (sc != "") sess!["scope_out"] = sc;
+        sess!["err_text"] = "";
+        OAuthWritePage(res, 200, "Authorization complete", "You can close this window and return to the app.");
     }
 
     // -- shell ------------------------------------------------------------------
@@ -3178,6 +3503,26 @@ static class Api
                 "Absolute or relative path of the shallow directory to delete. ~/ expands to the server user's home directory.")],
             "200 JSON { path, absolute_path, deleted: true }.",
             "400 missing path / not-a-directory / not-shallow, 404 not found, 403 forbidden."),
+        Route("POST", "/api/oauth2/start", "oauth2_start",
+            "Create an OAuth 2.0 session.",
+            [Param("client_id", "body (JSON)", true, "string", "OAuth client id.")],
+            "201 JSON { id, auth_url, redirect_uri, scope }.",
+            "400 missing client_id."),
+        Route("GET", "/api/oauth2/callback?code=<code>&state=<state>", "oauth2_callback",
+            "Loopback redirect target for OAuth consent.", [],
+            "200 HTML page.", "400 unknown state."),
+        Route("GET", "/api/oauth2/poll?id=<id>", "oauth2_poll",
+            "Read the state of an OAuth session.",
+            [Param("id", "query", true, "string", "Session id.")],
+            "200 JSON { id, status }.", "400 missing id, 404 unknown session."),
+        Route("POST", "/api/oauth2/refresh?id=<id>", "oauth2_refresh",
+            "Request a fresh access token.",
+            [Param("id", "query", true, "string", "Session id.")],
+            "200 JSON { id, access_token, token_type, expires_in, scope }.", "400 missing id."),
+        Route("POST", "/api/oauth2/close?id=<id>", "oauth2_close",
+            "Drop an OAuth session.",
+            [Param("id", "query", true, "string", "Session id.")],
+            "200 JSON { id, closed: true }.", "400 missing id."),
         Route("POST", "/api/shell", "exec_shell",
             "Execute a bash command string (pipes, redirections and all bash syntax allowed) and return the exit code plus separately captured stdout and stderr. WARNING: this is arbitrary remote code execution on the host; the server binds localhost by default and relies on that for protection.",
             [Param("command", "body (JSON)", true, "string",

@@ -11,6 +11,7 @@ from handler_socket import HandlerSocketMixin
 from handler_socket_ws import HandlerSocketWsMixin
 from handler_sqlite import HandlerSqliteMixin
 from handler_sysinfo import HandlerSysinfoMixin
+from handler_oauth2 import HandlerOAuth2Mixin
 from hosts import HOST_DENIED_MSG, host_allowed
 from routes import OPEN_ROUTES, ROUTES
 from tags import jenc
@@ -21,6 +22,7 @@ from version import VERSION
 class Handler(HandlerFsMixin, HandlerShellMixin,
                 HandlerSocketMixin, HandlerSocketWsMixin,
                 HandlerSqliteMixin, HandlerSysinfoMixin,
+                HandlerOAuth2Mixin,
                 BaseHTTPRequestHandler):
     """Dispatching handler (see handler_* mixins for endpoints)."""
     server_version = "GnumarusNativeOps/" + VERSION
@@ -145,6 +147,13 @@ class Handler(HandlerFsMixin, HandlerShellMixin,
             self._send_error_json(405, "Method GET not supported for this route (use POST).")
         elif route == "/api/sysinfo":
             self._handle_sysinfo()
+        elif route == "/api/oauth2/callback":
+            self._handle_oauth2_callback(query)
+        elif route == "/api/oauth2/poll":
+            self._handle_oauth2_poll(query)
+        elif route in ("/api/oauth2/start", "/api/oauth2/refresh",
+                       "/api/oauth2/close"):
+            self._send_error_json(405, "Method GET not supported for this route.")
         else:
             self._send_error_json(404, "Unknown route: %s" % route)
 
@@ -170,6 +179,14 @@ class Handler(HandlerFsMixin, HandlerShellMixin,
             self._handle_socket_close(query)
         elif route == "/api/socket/starttls":
             self._handle_socket_starttls(query)
+        elif route == "/api/oauth2/start":
+            self._handle_oauth2_start()
+        elif route == "/api/oauth2/refresh":
+            self._handle_oauth2_refresh(query)
+        elif route == "/api/oauth2/close":
+            self._handle_oauth2_close(query)
+        elif route in ("/api/oauth2/callback", "/api/oauth2/poll"):
+            self._send_error_json(405, "Method POST not supported for this route.")
         elif route in ("/", "/api/help", "/api/dir", "/api/dir/shallow",
                        "/api/shallow_dir", "/api/dir_shallow", "/api/sysinfo",
                        "/api/socket/recv", "/api/socket/ws"):
@@ -187,6 +204,9 @@ class Handler(HandlerFsMixin, HandlerShellMixin,
             self._handle_overwrite_file(query)
         elif route in ("/", "/api/help", "/api/dir", "/api/dir/shallow",
                        "/api/shallow_dir", "/api/dir_shallow", "/api/shell",
+                       "/api/oauth2/start", "/api/oauth2/callback",
+                       "/api/oauth2/poll", "/api/oauth2/refresh",
+                       "/api/oauth2/close",
                        "/api/sqlite/create", "/api/sqlite/query",
                        "/api/sysinfo", "/api/socket/open",
                        "/api/socket/send", "/api/socket/recv",
@@ -213,7 +233,10 @@ class Handler(HandlerFsMixin, HandlerShellMixin,
                        "/api/sysinfo", "/api/socket/open",
                        "/api/socket/send", "/api/socket/recv",
                        "/api/socket/close", "/api/socket/starttls",
-                       "/api/socket/ws"):
+                       "/api/socket/ws",
+                       "/api/oauth2/start", "/api/oauth2/callback",
+                       "/api/oauth2/poll", "/api/oauth2/refresh",
+                       "/api/oauth2/close"):
             self._send_error_json(405, "Method DELETE not supported for this route.")
         else:
             self._send_error_json(404, "Unknown route: %s" % route)

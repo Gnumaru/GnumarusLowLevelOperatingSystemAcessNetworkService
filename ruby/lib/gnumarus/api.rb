@@ -10,6 +10,7 @@ require_relative "sysinfo"
 require_relative "sqlite"
 require_relative "sock"
 require_relative "sock_ws"
+require_relative "oauth2"
 
 module Gnumarus
   # Per-server state (auth + working directory), mirroring the Go Opts.
@@ -22,7 +23,7 @@ module Gnumarus
     VERSION = "0.10.0"
     SERVICE_NAME = "GnumarusPythonNativeOperationsHttpService"
 
-    OPEN_ROUTES = { "/" => true, "/api/help" => true }.freeze
+    OPEN_ROUTES = { "/" => true, "/api/help" => true, "/api/oauth2/callback" => true }.freeze
 
     GET_POST_ONLY = %w[
       /api/shell /api/sqlite/create /api/sqlite/query
@@ -35,6 +36,8 @@ module Gnumarus
       /api/shell /api/sqlite/create /api/sqlite/query
       /api/sysinfo /api/socket/open /api/socket/send /api/socket/recv
       /api/socket/close /api/socket/starttls /api/socket/ws
+      /api/oauth2/start /api/oauth2/callback /api/oauth2/poll
+      /api/oauth2/refresh /api/oauth2/close
     ].freeze
 
     module_function
@@ -111,6 +114,10 @@ module Gnumarus
       when "/api/socket/recv" then Sock.recv(conn, req, opts)
       when "/api/socket/ws" then SockWs.ws(conn, req, opts)
       when "/api/sysinfo" then Sysinfo.sysinfo(conn, req, opts)
+      when "/api/oauth2/callback" then OAuth2.callback(conn, req, opts)
+      when "/api/oauth2/poll" then OAuth2.poll(conn, req, opts)
+      when "/api/oauth2/start", "/api/oauth2/refresh", "/api/oauth2/close"
+        Http.send_err(conn, 405, "Method GET not supported for this route.")
       else
         if GET_POST_ONLY.include?(req.path)
           Http.send_err(conn, 405,
@@ -131,6 +138,11 @@ module Gnumarus
       when "/api/socket/send" then Sock.send(conn, req, opts)
       when "/api/socket/close" then Sock.close(conn, req, opts)
       when "/api/socket/starttls" then Sock.starttls(conn, req, opts)
+      when "/api/oauth2/start" then OAuth2.start(conn, req, opts)
+      when "/api/oauth2/refresh" then OAuth2.refresh(conn, req, opts)
+      when "/api/oauth2/close" then OAuth2.close(conn, req, opts)
+      when "/api/oauth2/callback", "/api/oauth2/poll"
+        Http.send_err(conn, 405, "Method POST not supported for this route.")
       when "/", "/api/help", "/api/dir", "/api/sysinfo", "/api/socket/recv",
            "/api/socket/ws"
         Http.send_err(conn, 405, "Method POST not supported for this route.")
@@ -173,7 +185,7 @@ module Gnumarus
                      "routes" => catalog,
                      "auth" => {
                        "required" => Tags.jenc(opts.auth_required),
-                       "open_routes" => ["/", "/api/help", "OPTIONS *"],
+                       "open_routes" => ["/", "/api/help", "/api/oauth2/callback", "OPTIONS *"],
                        "how" => "Authorization: Bearer <token> header (preferred) or ?token= query parameter."
                      })
     end
