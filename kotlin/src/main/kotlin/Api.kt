@@ -144,6 +144,12 @@ fun buildRoutes(): JsonArray {
             "Absolute or relative path of the empty directory to delete. ~/ expands to the server user's home directory.")),
         "200 JSON { path, absolute_path, deleted: true }.",
         "400 missing path / not-a-directory / not-empty, 404 not found, 403 forbidden."))
+    r.add(routeEntry("DELETE", "/api/dir/shallow?path=<path>", "delete_directory_shallow",
+        "Delete a shallow directory: a directory containing only files (including symlinks) and empty subdirectories. Fails when it contains a non-empty real subdirectory. Does not delete recursively.",
+        listOf(param("path", "query", true, "string",
+            "Absolute or relative path of the shallow directory to delete. ~/ expands to the server user's home directory.")),
+        "200 JSON { path, absolute_path, deleted: true }.",
+        "400 missing path / not-a-directory / not-shallow, 404 not found, 403 forbidden."))
     r.add(routeEntry("POST", "/api/shell", "exec_shell",
         "Execute a bash command string (pipes, redirections and all bash syntax allowed) and return the exit code plus separately captured stdout and stderr. WARNING: this is arbitrary remote code execution on the host; the server binds localhost by default and relies on that for protection.",
         listOf(
@@ -1150,8 +1156,8 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             "/api/socket/send" -> handleSocketSend(ex, q)
             "/api/socket/close" -> handleSocketClose(ex, q)
             "/api/socket/starttls" -> handleSocketStarttls(ex, q)
-            "/", "/api/help", "/api/dir", "/api/sysinfo",
-            "/api/socket/recv", "/api/socket/ws" ->
+            "/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow",
+            "/api/sysinfo", "/api/socket/recv", "/api/socket/ws" ->
                 err(ex, 405, "Method POST not supported for this route.")
             else -> err(ex, 404, "Unknown route: $path")
         }
@@ -1162,7 +1168,8 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
         val q = queryParams(ex)
         when (path) {
             "/api/file" -> handleOverwriteFile(ex, q)
-            "/", "/api/help", "/api/dir", "/api/shell", "/api/sqlite/create",
+            "/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow",
+            "/api/shell", "/api/sqlite/create",
             "/api/sqlite/query", "/api/sysinfo",
             "/api/socket/open", "/api/socket/send", "/api/socket/recv",
             "/api/socket/close", "/api/socket/starttls", "/api/socket/ws" ->
@@ -1177,6 +1184,7 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
         when (path) {
             "/api/file" -> handleDeleteFile(ex, q)
             "/api/dir" -> handleDeleteDir(ex, q)
+            "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow" -> handleDeleteDirShallow(ex, q)
             "/", "/api/help", "/api/shell", "/api/sqlite/create",
             "/api/sqlite/query", "/api/sysinfo",
             "/api/socket/open", "/api/socket/send", "/api/socket/recv",
@@ -1856,6 +1864,10 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
     }
 
     fun handleDeleteDir(ex: Exchange, q: Map<String, String>) {
+        val sh = q["shallow"]?.trim()?.lowercase()
+        if (sh in listOf("1", "true", "yes", "on")) {
+            handleDeleteDirShallow(ex, q); return
+        }
         val abs = reqPath(ex, q) ?: return
         val p = Paths.get(abs)
         if (!Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
@@ -1865,6 +1877,55 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             err(ex, 400, "Path is not a directory", abs); return
         }
         try {
+            Files.delete(p)
+        } catch (e: NoSuchFileException) {
+            err(ex, 404, "Path does not exist", abs); return
+        } catch (e: AccessDeniedException) {
+            err(ex, 403, "Permission denied", abs); return
+        } catch (e: DirectoryNotEmptyException) {
+            err(ex, 400, "Cannot delete directory: Directory not empty: '$abs'", abs); return
+        } catch (e: java.io.IOException) {
+            err(ex, 400, "Cannot delete directory: ${e.message}", abs); return
+        }
+        sendJson(ex, 200, jo("path" to (q["path"] ?: ""), "absolute_path" to abs, "deleted" to jenc(true)))
+    }
+
+    fun handleDeleteDirShallow(ex: Exchange, q: Map<String, String>) {
+        val abs = reqPath(ex, q) ?: return
+        val p = Paths.get(abs)
+        if (!Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
+            err(ex, 404, "Path does not exist", abs); return
+        }
+        if (Files.isSymbolicLink(p) || !Files.isDirectory(p)) {
+            err(ex, 400, "Path is not a directory", abs); return
+        }
+        val entries = try {
+            Files.list(p).use { it.toList() }
+        } catch (e: java.io.IOException) {
+            err(ex, 400, "Cannot delete directory: ${e.message}", abs); return
+        }
+        for (entry in entries) {
+            if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS) &&
+                !Files.isSymbolicLink(entry)) {
+                val subEntries = try {
+                    Files.list(entry).use { it.toList() }
+                } catch (e: java.io.IOException) {
+                    err(ex, 400, "Cannot delete directory: ${e.message}", abs); return
+                }
+                if (subEntries.isNotEmpty()) {
+                    err(ex, 400, "Directory is not shallow (contains a non-empty subdirectory)", abs); return
+                }
+            }
+        }
+        try {
+            for (entry in entries) {
+                if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS) &&
+                    !Files.isSymbolicLink(entry)) {
+                    Files.delete(entry)
+                } else {
+                    Files.delete(entry)
+                }
+            }
             Files.delete(p)
         } catch (e: NoSuchFileException) {
             err(ex, 404, "Path does not exist", abs); return

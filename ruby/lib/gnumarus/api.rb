@@ -31,7 +31,8 @@ module Gnumarus
     ].freeze
 
     ALWAYS_KNOWN = %w[
-      / /api/help /api/dir /api/shell /api/sqlite/create /api/sqlite/query
+      / /api/help /api/dir /api/dir/shallow /api/shallow_dir /api/dir_shallow
+      /api/shell /api/sqlite/create /api/sqlite/query
       /api/sysinfo /api/socket/open /api/socket/send /api/socket/recv
       /api/socket/close /api/socket/starttls /api/socket/ws
     ].freeze
@@ -154,6 +155,7 @@ module Gnumarus
       case req.path
       when "/api/file" then FsOps.delete_file(conn, req, opts)
       when "/api/dir" then FsOps.delete_dir(conn, req, opts)
+      when "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow" then FsOps.delete_dir_shallow(conn, req, opts)
       else
         if ALWAYS_KNOWN.include?(req.path)
           Http.send_err(conn, 405, "Method DELETE not supported for this route.")

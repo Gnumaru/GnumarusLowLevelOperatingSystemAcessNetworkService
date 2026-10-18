@@ -358,6 +358,9 @@ async function doPost(
     case "/":
     case "/api/help":
     case "/api/dir":
+    case "/api/dir/shallow":
+    case "/api/shallow_dir":
+    case "/api/dir_shallow":
     case "/api/sysinfo":
     case "/api/socket/recv":
     case "/api/socket/ws":
@@ -375,7 +378,7 @@ async function doPut(
     handleOverwriteFile(req, res, query, opts);
     return;
   }
-  if (["/", "/api/help", "/api/dir", "/api/shell", "/api/sqlite/create",
+  if (["/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow", "/api/shell", "/api/sqlite/create",
     "/api/sqlite/query", "/api/sysinfo", "/api/socket/open",
     "/api/socket/send", "/api/socket/recv",
     "/api/socket/close", "/api/socket/starttls", "/api/socket/ws"].includes(pathname)) {
@@ -395,6 +398,10 @@ async function doDelete(
   }
   if (pathname === "/api/dir") {
     handleDeleteDir(res, query, opts);
+    return;
+  }
+  if (pathname === "/api/dir/shallow" || pathname === "/api/shallow_dir" || pathname === "/api/dir_shallow") {
+    handleDeleteDirShallow(res, query, opts);
     return;
   }
   if (["/", "/api/help", "/api/shell", "/api/sqlite/create",
@@ -668,6 +675,11 @@ function handleDeleteFile(res: http.ServerResponse, query: URLSearchParams, opts
 }
 
 function handleDeleteDir(res: http.ServerResponse, query: URLSearchParams, opts: Opts): void {
+  const shallow = query.get("shallow");
+  if (shallow && ["1","true","yes","on"].includes(shallow.trim().toLowerCase())) {
+    handleDeleteDirShallow(res, query, opts);
+    return;
+  }
   const raw = reqPath(query);
   if (raw === null) { errPath(res); return; }
   const abs = resolvePath(raw, opts.cwd);
@@ -688,6 +700,58 @@ function handleDeleteDir(res: http.ServerResponse, query: URLSearchParams, opts:
     if (code === "ENOTEMPTY" || code === "EEXIST") {
       err(res, 400, `Cannot delete directory: Directory not empty: '${abs}'`, abs); return;
     }
+    err(res, 400, `Cannot delete directory: ${(e as Error).message}`, abs); return;
+  }
+  sendJson(res, 200, { path: raw, absolute_path: abs, deleted: jenc(true) });
+}
+
+function handleDeleteDirShallow(res: http.ServerResponse, query: URLSearchParams, opts: Opts): void {
+  const raw = reqPath(query);
+  if (raw === null) { errPath(res); return; }
+  const abs = resolvePath(raw, opts.cwd);
+  if (!lexists(abs)) { err(res, 404, "Path does not exist", abs); return; }
+  try {
+    if (fs.lstatSync(abs).isSymbolicLink() || !fs.statSync(abs).isDirectory()) {
+      err(res, 400, "Path is not a directory", abs); return;
+    }
+  } catch {
+    err(res, 404, "Path does not exist", abs); return;
+  }
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(abs);
+  } catch (e) {
+    err(res, 400, `Cannot delete directory: ${(e as Error).message}`, abs); return;
+  }
+  for (const name of entries) {
+    const sub = path.join(abs, name);
+    let st: fs.Stats;
+    try { st = fs.lstatSync(sub); } catch (e) { err(res, 400, `Cannot delete directory: ${(e as Error).message}`, abs); return; }
+    if (st.isDirectory() && !st.isSymbolicLink()) {
+      let subEntries: string[];
+      try { subEntries = fs.readdirSync(sub); } catch (e) {
+        err(res, 400, `Cannot delete directory: ${(e as Error).message}`, abs); return;
+      }
+      if (subEntries.length > 0) {
+        err(res, 400, "Directory is not shallow (contains a non-empty subdirectory)", abs); return;
+      }
+    }
+  }
+  try {
+    for (const name of fs.readdirSync(abs)) {
+      const p = path.join(abs, name);
+      const st = fs.lstatSync(p);
+      if (st.isDirectory() && !st.isSymbolicLink()) {
+        fs.rmdirSync(p);
+      } else {
+        fs.unlinkSync(p);
+      }
+    }
+    fs.rmdirSync(abs);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") { err(res, 404, "Path does not exist", abs); return; }
+    if (code === "EACCES" || code === "EPERM") { err(res, 403, "Permission denied", abs); return; }
     err(res, 400, `Cannot delete directory: ${(e as Error).message}`, abs); return;
   }
   sendJson(res, 200, { path: raw, absolute_path: abs, deleted: jenc(true) });
@@ -2146,6 +2210,12 @@ export const ROUTES: Route[] = [
       "Absolute or relative path of the empty directory to delete. ~/ expands to the server user's home directory.")],
     "200 JSON { path, absolute_path, deleted: true }.",
     "400 missing path / not-a-directory / not-empty, 404 not found, 403 forbidden."),
+  route("DELETE", "/api/dir/shallow?path=<path>", "delete_directory_shallow",
+    "Delete a shallow directory: a directory containing only files (including symlinks) and empty subdirectories. Fails when it contains a non-empty real subdirectory. Does not delete recursively.",
+    [param("path", "query", true, "string",
+      "Absolute or relative path of the shallow directory to delete. ~/ expands to the server user's home directory.")],
+    "200 JSON { path, absolute_path, deleted: true }.",
+    "400 missing path / not-a-directory / not-shallow, 404 not found, 403 forbidden."),
   route("POST", "/api/shell", "exec_shell",
     "Execute a bash command string (pipes, redirections and all bash syntax allowed) and return the exit code plus separately captured stdout and stderr. WARNING: this is arbitrary remote code execution on the host; the server binds localhost by default and relies on that for protection.",
     [param("command", "body (JSON)", true, "string",

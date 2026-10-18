@@ -137,7 +137,7 @@ Service index:
 | C# / .NET | `dotnet/` | `./dotnet/build.sh` | `dotnet dotnet/publish/gnumarus.dll` |
 | C++ | `cpp/` | `./cpp/build.sh` | `cpp/bin/gnumarus` |
 
-All ports share the same 18 routes; the Go reference adds the 5 Gmail
+All ports share the same 19 routes; the Go reference adds the 5 Gmail
 OAuth2 routes (23 total). A unified launcher is provided:
 
 ```
@@ -194,6 +194,7 @@ All routes return JSON unless noted. Errors are JSON objects of the form
 | PUT | `/api/file?path=...` | overwrite_file |
 | DELETE | `/api/file?path=...` | delete_file |
 | DELETE | `/api/dir?path=...` | delete_directory |
+| DELETE | `/api/dir/shallow?path=...` | delete_directory_shallow |
 | POST | `/api/shell` | exec_shell |
 | POST | `/api/sqlite/create?path=...` | sqlite_create |
 | POST | `/api/sqlite/query?path=...` | sqlite_query |

@@ -428,6 +428,9 @@ static class Api
             case "/":
             case "/api/help":
             case "/api/dir":
+            case "/api/dir/shallow":
+            case "/api/shallow_dir":
+            case "/api/dir_shallow":
             case "/api/sysinfo":
             case "/api/socket/recv":
             case "/api/socket/ws":
@@ -445,7 +448,7 @@ static class Api
             await HandleOverwriteFile(req, res, st);
             return;
         }
-        string[] known = ["/", "/api/help", "/api/dir", "/api/shell",
+        string[] known = ["/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow", "/api/shell",
             "/api/sqlite/create", "/api/sqlite/query", "/api/sysinfo",
             "/api/socket/open", "/api/socket/send", "/api/socket/recv",
             "/api/socket/close", "/api/socket/starttls", "/api/socket/ws"];
@@ -468,6 +471,11 @@ static class Api
         if (path == "/api/dir")
         {
             await HandleDeleteDir(req, res, st);
+            return;
+        }
+        if (path is "/api/dir/shallow" or "/api/shallow_dir" or "/api/dir_shallow")
+        {
+            await HandleDeleteDirShallow(req, res, st);
             return;
         }
         string[] known = ["/", "/api/help", "/api/shell",
@@ -951,6 +959,12 @@ static class Api
     private static async Task HandleDeleteDir(
         HttpListenerRequest req, HttpListenerResponse res, State st)
     {
+        var sh = (req.QueryString["shallow"] ?? "").Trim().ToLowerInvariant();
+        if (sh is "1" or "true" or "yes" or "on")
+        {
+            await HandleDeleteDirShallow(req, res, st);
+            return;
+        }
         var raw = req.QueryString["path"] ?? "";
         if (raw == "")
         {
@@ -1013,6 +1027,117 @@ static class Api
                 return;
             }
             await Err(res, 400, "Cannot delete directory", abs);
+            return;
+        }
+        await SendJson(res, 200, new Dictionary<string, object?>
+        {
+            ["path"] = raw, ["absolute_path"] = abs, ["deleted"] = Tags.Enc(true),
+        });
+    }
+
+    private static async Task HandleDeleteDirShallow(
+        HttpListenerRequest req, HttpListenerResponse res, State st)
+    {
+        var raw = req.QueryString["path"] ?? "";
+        if (raw == "")
+        {
+            await Err(res, 400, "Missing required query parameter: path");
+            return;
+        }
+        var abs = ResolvePath(raw, st.Cwd);
+        if (!Lexists(abs))
+        {
+            await Err(res, 404, "Path does not exist", abs);
+            return;
+        }
+        try
+        {
+            if (new FileInfo(abs).LinkTarget is not null || !Directory.Exists(abs))
+            {
+                await Err(res, 400, "Path is not a directory", abs);
+                return;
+            }
+        }
+        catch
+        {
+            await Err(res, 404, "Path does not exist", abs);
+            return;
+        }
+        string[] entries;
+        try
+        {
+            entries = Directory.GetFileSystemEntries(abs);
+        }
+        catch (Exception e)
+        {
+            await Err(res, 400, $"Cannot delete directory: {e.Message}", abs);
+            return;
+        }
+        foreach (var entry in entries)
+        {
+            try
+            {
+                if (new FileInfo(entry).LinkTarget is null && Directory.Exists(entry))
+                {
+                    if (Directory.GetFileSystemEntries(entry).Length > 0)
+                    {
+                        await Err(res, 400,
+                            "Directory is not shallow (contains a non-empty subdirectory)", abs);
+                        return;
+                    }
+                }
+            }
+            catch { }
+        }
+        try
+        {
+            foreach (var entry in entries)
+            {
+                if (new FileInfo(entry).LinkTarget is null && Directory.Exists(entry))
+                {
+                    Directory.Delete(entry, false);
+                }
+                else
+                {
+                    File.Delete(entry);
+                }
+            }
+            Directory.Delete(abs, false);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            await Err(res, 404, "Path does not exist", abs);
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            await Err(res, 403, "Permission denied", abs);
+            return;
+        }
+        catch (IOException)
+        {
+            if (Lexists(abs))
+            {
+                string[] left = [];
+                try { left = Directory.GetFileSystemEntries(abs); } catch { }
+                if (left.Length > 0)
+                {
+                    await Err(res, 400,
+                        $"Cannot delete directory: Directory not empty: '{abs}'", abs);
+                    return;
+                }
+            }
+            else
+            {
+                await Err(res, 404, "Path does not exist", abs);
+                return;
+            }
+            await Err(res, 400, "Cannot delete directory", abs);
+            return;
+        }
+        catch (Exception e)
+        {
+            await Err(res, 400, $"Cannot delete directory: {e.Message}", abs);
             return;
         }
         await SendJson(res, 200, new Dictionary<string, object?>
@@ -3048,6 +3173,12 @@ static class Api
                 "Absolute or relative path of the empty directory to delete. ~/ expands to the server user's home directory.")],
             "200 JSON { path, absolute_path, deleted: true }.",
             "400 missing path / not-a-directory / not-empty, 404 not found, 403 forbidden."),
+        Route("DELETE", "/api/dir/shallow?path=<path>", "delete_directory_shallow",
+            "Delete a shallow directory: a directory containing only files (including symlinks) and empty subdirectories. Fails when it contains a non-empty real subdirectory. Does not delete recursively.",
+            [Param("path", "query", true, "string",
+                "Absolute or relative path of the shallow directory to delete. ~/ expands to the server user's home directory.")],
+            "200 JSON { path, absolute_path, deleted: true }.",
+            "400 missing path / not-a-directory / not-shallow, 404 not found, 403 forbidden."),
         Route("POST", "/api/shell", "exec_shell",
             "Execute a bash command string (pipes, redirections and all bash syntax allowed) and return the exit code plus separately captured stdout and stderr. WARNING: this is arbitrary remote code execution on the host; the server binds localhost by default and relies on that for protection.",
             [Param("command", "body (JSON)", true, "string",

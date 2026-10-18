@@ -364,6 +364,11 @@ module Gnumarus
     # -- DELETE /api/dir -------------------------------------------------
 
     def delete_dir(conn, req, opts)
+      shallow = Util.first_query(req.query, "shallow")
+      if ["1", "true", "yes", "on"].include?(shallow.strip.downcase)
+        delete_dir_shallow(conn, req, opts)
+        return
+      end
       raw = Util.first_query(req.query, "path")
       if raw.empty?
         Http.send_err(conn, 400, "Missing required query parameter: path")
@@ -409,6 +414,89 @@ module Gnumarus
         return
       rescue Errno::EACCES, Errno::EPERM
         Http.send_err(conn, 403, "Permission denied", abs)
+        return
+      rescue SystemCallError => e
+        Http.send_err(conn, 400, "Cannot delete directory: #{e}", abs)
+        return
+      end
+
+      Http.send_json(conn, 200,
+                     "path" => raw, "absolute_path" => abs, "deleted" => "b:true")
+    end
+
+    def delete_dir_shallow(conn, req, opts)
+      raw = Util.first_query(req.query, "path")
+      if raw.empty?
+        Http.send_err(conn, 400, "Missing required query parameter: path")
+        return
+      end
+      abs = Util.resolve_path(raw, opts.cwd)
+      unless Util.lexists?(abs)
+        Http.send_err(conn, 404, "Path does not exist", abs)
+        return
+      end
+
+      li = begin
+        File.lstat(abs)
+      rescue SystemCallError
+        nil
+      end
+      if li.nil? || li.symlink?
+        Http.send_err(conn, 400, "Path is not a directory", abs)
+        return
+      end
+      st = begin
+        File.stat(abs)
+      rescue SystemCallError
+        nil
+      end
+      if st.nil? || !st.directory?
+        Http.send_err(conn, 400, "Path is not a directory", abs)
+        return
+      end
+
+      begin
+        children = Dir.children(abs)
+      rescue SystemCallError => e
+        Http.send_err(conn, 400, "Cannot delete directory: #{e}", abs)
+        return
+      end
+
+      children.each do |name|
+        sub = File.join(abs, name)
+        if File.directory?(sub) && !File.symlink?(sub)
+          begin
+            sub_children = Dir.children(sub)
+          rescue SystemCallError => e
+            Http.send_err(conn, 400, "Cannot delete directory: #{e}", abs)
+            return
+          end
+          if !sub_children.empty?
+            Http.send_err(conn, 400,
+                          "Directory is not shallow (contains a non-empty subdirectory)", abs)
+            return
+          end
+        end
+      end
+
+      begin
+        children.each do |name|
+          p = File.join(abs, name)
+          if File.directory?(p) && !File.symlink?(p)
+            Dir.rmdir(p)
+          else
+            File.delete(p)
+          end
+        end
+        Dir.rmdir(abs)
+      rescue Errno::ENOENT
+        Http.send_err(conn, 404, "Path does not exist", abs)
+        return
+      rescue Errno::EACCES, Errno::EPERM
+        Http.send_err(conn, 403, "Permission denied", abs)
+        return
+      rescue Errno::ENOTEMPTY
+        Http.send_err(conn, 400, "Cannot delete directory: Directory not empty: '#{abs}'", abs)
         return
       rescue SystemCallError => e
         Http.send_err(conn, 400, "Cannot delete directory: #{e}", abs)

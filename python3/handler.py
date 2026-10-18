@@ -170,7 +170,8 @@ class Handler(HandlerFsMixin, HandlerShellMixin,
             self._handle_socket_close(query)
         elif route == "/api/socket/starttls":
             self._handle_socket_starttls(query)
-        elif route in ("/", "/api/help", "/api/dir", "/api/sysinfo",
+        elif route in ("/", "/api/help", "/api/dir", "/api/dir/shallow",
+                       "/api/shallow_dir", "/api/dir_shallow", "/api/sysinfo",
                        "/api/socket/recv", "/api/socket/ws"):
             self._send_error_json(405, "Method POST not supported for this route.")
         else:
@@ -184,7 +185,8 @@ class Handler(HandlerFsMixin, HandlerShellMixin,
         query = parse_qs(parsed.query)
         if route == "/api/file":
             self._handle_overwrite_file(query)
-        elif route in ("/", "/api/help", "/api/dir", "/api/shell",
+        elif route in ("/", "/api/help", "/api/dir", "/api/dir/shallow",
+                       "/api/shallow_dir", "/api/dir_shallow", "/api/shell",
                        "/api/sqlite/create", "/api/sqlite/query",
                        "/api/sysinfo", "/api/socket/open",
                        "/api/socket/send", "/api/socket/recv",
@@ -204,6 +206,8 @@ class Handler(HandlerFsMixin, HandlerShellMixin,
             self._handle_delete_file(query)
         elif route == "/api/dir":
             self._handle_delete_dir(query)
+        elif route in ("/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow"):
+            self._handle_delete_dir_shallow(query)
         elif route in ("/", "/api/help", "/api/shell",
                        "/api/sqlite/create", "/api/sqlite/query",
                        "/api/sysinfo", "/api/socket/open",

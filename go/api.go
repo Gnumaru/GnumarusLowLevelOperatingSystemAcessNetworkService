@@ -432,7 +432,8 @@ func doPost(w http.ResponseWriter, r *http.Request, path string, q map[string][]
 		handleOAuth2Refresh(w, q)
 	case "/api/oauth2/close":
 		handleOAuth2Close(w, q)
-	case "/", "/api/help", "/api/dir", "/api/sysinfo", "/api/socket/recv",
+	case "/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow",
+		"/api/sysinfo", "/api/socket/recv",
 		"/api/socket/ws", "/api/oauth2/poll", oauthCallbackPath:
 		sendErr(w, 405, "Method POST not supported for this route.", "")
 	default:
@@ -445,7 +446,7 @@ func doPut(w http.ResponseWriter, r *http.Request, path string, q map[string][]s
 		handleOverwriteFile(w, r, q, opts)
 		return
 	}
-	for _, known := range []string{"/", "/api/help", "/api/dir", "/api/shell",
+	for _, known := range []string{"/", "/api/help", "/api/dir", "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow", "/api/shell",
 		"/api/sqlite/create", "/api/sqlite/query", "/api/sysinfo",
 		"/api/socket/open", "/api/socket/send", "/api/socket/recv",
 		"/api/socket/close", "/api/socket/starttls", "/api/socket/ws",
@@ -467,6 +468,10 @@ func doDelete(w http.ResponseWriter, r *http.Request, path string, q map[string]
 	}
 	if path == "/api/dir" {
 		handleDeleteDir(w, q, opts)
+		return
+	}
+	if path == "/api/dir/shallow" || path == "/api/shallow_dir" || path == "/api/dir_shallow" {
+		handleDeleteDirShallow(w, q, opts)
 		return
 	}
 	for _, known := range []string{"/", "/api/help", "/api/shell",

@@ -19,7 +19,7 @@ class TestHelpCors(unittest.TestCase):
         base = {
             "help", "read_directory", "read_file", "index",
             "create_file", "overwrite_file", "delete_file",
-            "delete_directory", "exec_shell",
+            "delete_directory", "delete_directory_shallow", "exec_shell",
             "sqlite_create", "sqlite_query", "system_info",
             "socket_open", "socket_send", "socket_recv", "socket_close",
         }

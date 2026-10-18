@@ -229,6 +229,29 @@ ROUTES = [
                   "404 not found, 403 forbidden.",
     },
     {
+        "method": "DELETE",
+        "url": "/api/dir/shallow?path=<path>",
+        "name": "delete_directory_shallow",
+        "description": "Delete a shallow directory: a directory containing "
+                       "only files (including symlinks) and empty "
+                       "subdirectories. Fails when it contains a non-empty "
+                       "real subdirectory. Does not delete recursively.",
+        "params": [
+            {
+                "name": "path",
+                "location": "query",
+                "required": "b:true",
+                "type": "string",
+                "description": "Absolute or relative path of the shallow "
+                               "directory to delete. ~/ expands to the "
+                               "server user's home directory.",
+            }
+        ],
+        "response": "200 JSON { path, absolute_path, deleted: true }.",
+        "errors": "400 missing path / not-a-directory / not-shallow, "
+                  "404 not found, 403 forbidden.",
+    },
+    {
         "method": "POST",
         "url": "/api/shell",
         "name": "exec_shell",

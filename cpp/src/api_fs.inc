@@ -325,7 +325,109 @@ HttpResponse handle_delete_file(const HttpRequest& req, const ApiState& st) {
     return send_json(200, o);
 }
 
+static bool is_truthy_str(const std::string& v) {
+    std::string t;
+    for (char c : v) t += (char)std::tolower((unsigned char)c);
+    // trim
+    while (!t.empty() && std::isspace((unsigned char)t.front())) t.erase(t.begin());
+    while (!t.empty() && std::isspace((unsigned char)t.back())) t.pop_back();
+    return t == "1" || t == "true" || t == "yes" || t == "on";
+}
+
+HttpResponse handle_delete_dir_shallow(const HttpRequest& req, const ApiState& st) {
+    bool missing = false;
+    std::string raw = req_path(req, missing);
+    if (missing)
+        return send_json(400, jerr(400, "Missing required query parameter: path"));
+    std::string abs = resolve_path(raw, st.cwd);
+    if (!lexists(abs))
+        return send_json(404, jerr(404, "Path does not exist", abs));
+    if (is_symlink(abs) || !is_dir_follow(abs))
+        return send_json(400, jerr(400, "Path is not a directory", abs));
+
+    // shallow check: no non-empty real subdirectory
+    DIR* dir = opendir(abs.c_str());
+    if (!dir)
+        return send_json(400, jerr(400, std::string("Cannot delete directory: ") + strerror(errno), abs));
+    std::vector<std::string> names;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != nullptr) {
+        std::string name(ent->d_name);
+        if (name == "." || name == "..") continue;
+        names.push_back(name);
+    }
+    closedir(dir);
+    for (const auto& name : names) {
+        std::string sub = abs + "/" + name;
+        if (is_symlink(sub)) continue;
+        if (is_dir_follow(sub)) {
+            DIR* sdir = opendir(sub.c_str());
+            bool nonempty = false;
+            if (sdir) {
+                struct dirent* e2;
+                while ((e2 = readdir(sdir)) != nullptr) {
+                    std::string n(e2->d_name);
+                    if (n != "." && n != "..") { nonempty = true; break; }
+                }
+                closedir(sdir);
+            }
+            if (nonempty)
+                return send_json(400, jerr(400, "Directory is not shallow (contains a non-empty subdirectory)", abs));
+        }
+    }
+
+    // delete contents
+    for (const auto& name : names) {
+        std::string p = abs + "/" + name;
+        if (!is_symlink(p) && is_dir_follow(p)) {
+            if (rmdir(p.c_str()) != 0) {
+                if (errno == ENOENT)
+                    return send_json(404, jerr(404, "Path does not exist", abs));
+                if (errno == EACCES || errno == EPERM)
+                    return send_json(403, jerr(403, "Permission denied", abs));
+                return send_json(400, jerr(400, std::string("Cannot delete directory: ") + strerror(errno), abs));
+            }
+        } else {
+            if (unlink(p.c_str()) != 0) {
+                if (errno == ENOENT)
+                    return send_json(404, jerr(404, "Path does not exist", abs));
+                if (errno == EACCES || errno == EPERM)
+                    return send_json(403, jerr(403, "Permission denied", abs));
+                return send_json(400, jerr(400, std::string("Cannot delete directory: ") + strerror(errno), abs));
+            }
+        }
+    }
+    if (rmdir(abs.c_str()) != 0) {
+        if (errno == ENOENT)
+            return send_json(404, jerr(404, "Path does not exist", abs));
+        if (errno == EACCES || errno == EPERM)
+            return send_json(403, jerr(403, "Permission denied", abs));
+        DIR* d = opendir(abs.c_str());
+        bool nonempty = false;
+        if (d) {
+            struct dirent* e2;
+            while ((e2 = readdir(d)) != nullptr) {
+                std::string n(e2->d_name);
+                if (n != "." && n != "..") { nonempty = true; break; }
+            }
+            closedir(d);
+        }
+        if (nonempty)
+            return send_json(400, jerr(400, "Cannot delete directory: Directory not empty: '" + abs + "'", abs));
+        return send_json(400, jerr(400, std::string("Cannot delete directory: ") + strerror(errno), abs));
+    }
+    json o;
+    o["path"] = raw;
+    o["absolute_path"] = abs;
+    o["deleted"] = jenc_bool(true);
+    return send_json(200, o);
+}
+
 HttpResponse handle_delete_dir(const HttpRequest& req, const ApiState& st) {
+    auto sit = req.query.find("shallow");
+    if (sit != req.query.end() && is_truthy_str(sit->second)) {
+        return handle_delete_dir_shallow(req, st);
+    }
     bool missing = false;
     std::string raw = req_path(req, missing);
     if (missing)

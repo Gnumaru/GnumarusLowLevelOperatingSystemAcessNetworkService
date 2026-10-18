@@ -334,6 +334,10 @@ class GApi {
         if ($path === '/api/dir') {
             return $this->handleDeleteDir($req);
         }
+        if (in_array($path, ['/api/dir/shallow', '/api/shallow_dir',
+                '/api/dir_shallow'], true)) {
+            return $this->handleDeleteDirShallow($req);
+        }
         if (in_array($path, ['/', '/api/help', '/api/shell',
                 '/api/sqlite/create', '/api/sqlite/query', '/api/sysinfo',
                 '/api/socket/open', '/api/socket/send', '/api/socket/recv',
@@ -584,6 +588,10 @@ class GApi {
 
     private function handleDeleteDir(GRequest $req): GResponse {
         $query = $req->query;
+        $shallow = isset($query['shallow']) ? trim(strtolower((string)$query['shallow'])) : '';
+        if (in_array($shallow, ['1', 'true', 'yes', 'on'], true)) {
+            return $this->handleDeleteDirShallow($req);
+        }
         [$abs, $absErr] = $this->reqPath($query);
         if ($absErr !== null) return $absErr;
         if (!self::lexists($abs)) {
@@ -603,6 +611,57 @@ class GApi {
             if (is_array($names) && count(array_filter($names,
                     fn($n) => $n !== '.' && $n !== '..')) > 0) {
                 return self::err(400, "Cannot delete directory: Directory not empty: '$abs'", $abs);
+            }
+            return self::err(400, 'Cannot delete directory', $abs);
+        }
+        return GResponse::json(200, ['path' => $query['path'],
+            'absolute_path' => $abs, 'deleted' => self::jenc(true)]);
+    }
+
+    private function handleDeleteDirShallow(GRequest $req): GResponse {
+        $query = $req->query;
+        [$abs, $absErr] = $this->reqPath($query);
+        if ($absErr !== null) return $absErr;
+        if (!self::lexists($abs)) {
+            return self::err(404, 'Path does not exist', $abs);
+        }
+        if (is_link($abs) || !is_dir($abs)) {
+            return self::err(400, 'Path is not a directory', $abs);
+        }
+        $names = @scandir($abs);
+        if (!is_array($names)) {
+            return self::err(400, 'Cannot delete directory', $abs);
+        }
+        $entries = array_values(array_filter($names,
+            fn($n) => $n !== '.' && $n !== '..'));
+        foreach ($entries as $name) {
+            $sub = $abs . '/' . $name;
+            if (is_dir($sub) && !is_link($sub)) {
+                $subNames = @scandir($sub);
+                $subEntries = is_array($subNames) ? array_values(array_filter(
+                    $subNames, fn($n) => $n !== '.' && $n !== '..')) : [];
+                if (count($subEntries) > 0) {
+                    return self::err(400,
+                        'Directory is not shallow (contains a non-empty subdirectory)',
+                        $abs);
+                }
+            }
+        }
+        foreach ($entries as $name) {
+            $p = $abs . '/' . $name;
+            if (is_dir($p) && !is_link($p)) {
+                if (!@rmdir($p)) {
+                    return self::err(400, 'Cannot delete directory', $abs);
+                }
+            } else {
+                if (!@unlink($p)) {
+                    return self::err(400, 'Cannot delete directory', $abs);
+                }
+            }
+        }
+        if (!@rmdir($abs)) {
+            if (!self::lexists($abs)) {
+                return self::err(404, 'Path does not exist', $abs);
             }
             return self::err(400, 'Cannot delete directory', $abs);
         }
@@ -1300,6 +1359,12 @@ class GApi {
                     'Absolute or relative path of the empty directory to delete. ~/ expands to the server user\'s home directory.')],
                 '200 JSON { path, absolute_path, deleted: true }.',
                 '400 missing path / not-a-directory / not-empty, 404 not found, 403 forbidden.'),
+            self::routeE('DELETE', '/api/dir/shallow?path=<path>', 'delete_directory_shallow',
+                'Delete a shallow directory: a directory containing only files (including symlinks) and empty subdirectories. Fails when it contains a non-empty real subdirectory. Does not delete recursively.',
+                [self::paramP('path', 'query', true, 'string',
+                    'Absolute or relative path of the shallow directory to delete. ~/ expands to the server user\'s home directory.')],
+                '200 JSON { path, absolute_path, deleted: true }.',
+                '400 missing path / not-a-directory / not-shallow, 404 not found, 403 forbidden.'),
             self::routeE('POST', '/api/shell', 'exec_shell',
                 'Execute a bash command string (pipes, redirections and all bash syntax allowed) and return the exit code plus separately captured stdout and stderr. WARNING: this is arbitrary remote code execution on the host; the server binds localhost by default and relies on that for protection.',
                 [self::paramP('command', 'body (JSON)', true, 'string',

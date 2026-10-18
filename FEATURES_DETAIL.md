@@ -116,6 +116,12 @@
   only empty directories. Success `200 { ..., deleted: true }`.
   Errors: `400` missing path / not-a-directory / not-empty,
   `404` not found, `403` permission.
+- `DELETE /api/dir/shallow?path=...` (delete_directory_shallow): deletes a
+  shallow directory containing only files (including symlinks) and empty
+  subdirectories. Fails when it contains a non-empty real subdirectory.
+  Does not delete recursively. Success `200 { ..., deleted: true }`.
+  Errors: `400` missing path / not-a-directory / not-shallow, `404` not
+  found, `403` permission.
 
 ## 10. Regression Suite (`tests/`)
 

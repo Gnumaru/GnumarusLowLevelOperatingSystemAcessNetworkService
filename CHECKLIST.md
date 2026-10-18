@@ -150,3 +150,7 @@
 - [x] Auth/Provider alignment: choosing Google OAuth2 selects the Gmail preset (imap.gmail.com:993); provider persisted + aligned on load
 - [x] Popup close no longer triggers the COOP warning (callback page closes itself; only a blank popup is closed by the opener)
 - [x] Harness covers the alignment (29 checks); headless Chrome smoke + end-to-end page load green; full suite 233 OK
+
+## Shallow directory deletion route
+- [x] Implemented delete_directory_shallow in all runtimes (go, rust, python, nodejs, php, ruby, kotlin, dotnet, cpp)
+- [x] Added automated tests in tests/test_delete.py

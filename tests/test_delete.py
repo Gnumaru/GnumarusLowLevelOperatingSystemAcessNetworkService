@@ -82,6 +82,58 @@ class TestDelete(unittest.TestCase):
         status, _, _ = json_request("DELETE", "/api/dir")
         self.assertEqual(status, 400)
 
+    # -- shallow directories ---------------------------------------------
+
+    def test_delete_shallow_dir_with_files(self):
+        target = os.path.join(self.ws, "shallow")
+        os.makedirs(target, exist_ok=True)
+        with open(os.path.join(target, "f.txt"), "w") as fh:
+            fh.write("x")
+        status, _, data = json_request(
+            "DELETE", "/api/dir/shallow?path=" + quote(target))
+        self.assertEqual(status, 200)
+        self.assertEqual(tv(data["deleted"]), True)
+        self.assertFalse(os.path.exists(target))
+
+    def test_delete_shallow_dir_with_empty_subdir(self):
+        target = os.path.join(self.ws, "shallow2")
+        os.makedirs(os.path.join(target, "empty"), exist_ok=True)
+        with open(os.path.join(target, "f.txt"), "w") as fh:
+            fh.write("x")
+        status, _, data = json_request(
+            "DELETE", "/api/dir/shallow?path=" + quote(target))
+        self.assertEqual(status, 200)
+        self.assertFalse(os.path.exists(target))
+
+    def test_delete_shallow_dir_with_symlink_to_dir(self):
+        target = os.path.join(self.ws, "shallow3")
+        os.makedirs(target, exist_ok=True)
+        os.symlink(self.ws, os.path.join(target, "linkdir"))
+        status, _, data = json_request(
+            "DELETE", "/api/dir/shallow?path=" + quote(target))
+        self.assertEqual(status, 200)
+        self.assertFalse(os.path.exists(target))
+
+    def test_delete_shallow_non_shallow_400(self):
+        target = os.path.join(self.ws, "deep")
+        os.makedirs(os.path.join(target, "sub"), exist_ok=True)
+        with open(os.path.join(target, "sub", "f.txt"), "w") as fh:
+            fh.write("x")
+        status, _, _ = json_request(
+            "DELETE", "/api/dir/shallow?path=" + quote(target))
+        self.assertEqual(status, 400)
+        self.assertTrue(os.path.isdir(target))
+
+    def test_delete_shallow_via_query_param(self):
+        target = os.path.join(self.ws, "shallow4")
+        os.makedirs(target, exist_ok=True)
+        with open(os.path.join(target, "f.txt"), "w") as fh:
+            fh.write("x")
+        status, _, data = json_request(
+            "DELETE", "/api/dir?path=" + quote(target) + "&shallow=1")
+        self.assertEqual(status, 200)
+        self.assertFalse(os.path.exists(target))
+
 
 if __name__ == "__main__":
     unittest.main()

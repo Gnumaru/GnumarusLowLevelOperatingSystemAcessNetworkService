@@ -14,4 +14,4 @@
 - deve haver um endpoint 'help' que retorna a lista com url, nome, descricao, formato de parametros e todos os detalhes de todas as rotas implementadas
 - o servidor deve aceitar requisicoes de qualquer origem (CORS Cross-Origin Resource Sharing) porque a razao de existencia do servidor é justamente permitir criação de aplicacoes web frontend com acesso a certos recursos nativos do sistema do usuario, permitindo por exemplo criar um gerenciador de arquivos real apenas como um app web frontend sem utilizar electron, nw.js ou outras tecnologias quaisquer.
 - devem ser sempre criados testes automatizados para testar todas as funcionalidades da aplicacao, que devem ser executados sempre para evitar que alteracoes na aplicacao gerem regressoes.
-- ao realizar alteracoes nos diversos ports do serviço, faça na seguinte ordem: go, rust, python, nodejs, php, ruby, kotlin, dotnet, c++
+- ao realizar alteracoes nos diversos runtimes/ports do serviço, faça na seguinte ordem: go, rust, python, nodejs, php, ruby, kotlin, dotnet, c++

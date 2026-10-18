@@ -331,7 +331,7 @@ fn do_post(req: &Request, state: &State) -> Response {
         "/api/socket/send" => crate::socket::handle_send(req),
         "/api/socket/close" => crate::socket::handle_close(req),
         "/api/socket/starttls" => crate::socket::handle_starttls(req),
-        "/" | "/api/help" | "/api/dir" | "/api/sysinfo" | "/api/socket/recv" | "/api/socket/ws" => {
+        "/" | "/api/help" | "/api/dir" | "/api/dir/shallow" | "/api/shallow_dir" | "/api/dir_shallow" | "/api/sysinfo" | "/api/socket/recv" | "/api/socket/ws" => {
             err(405, "Method POST not supported for this route.", None)
         }
         _ => err(404, &format!("Unknown route: {}", req.path), None),
@@ -346,6 +346,9 @@ fn do_put(req: &Request, state: &State) -> Response {
         "/",
         "/api/help",
         "/api/dir",
+        "/api/dir/shallow",
+        "/api/shallow_dir",
+        "/api/dir_shallow",
         "/api/shell",
         "/api/sqlite/create",
         "/api/sqlite/query",
@@ -370,6 +373,9 @@ fn do_delete(req: &Request, state: &State) -> Response {
     }
     if req.path == "/api/dir" {
         return handle_delete_dir(req, state);
+    }
+    if req.path == "/api/dir/shallow" || req.path == "/api/shallow_dir" || req.path == "/api/dir_shallow" {
+        return handle_delete_dir_shallow(req, state);
     }
     for known in [
         "/",
@@ -783,7 +789,99 @@ fn handle_delete_file(req: &Request, state: &State) -> Response {
     send_json_obj(200, &o)
 }
 
+fn is_truthy(v: &str) -> bool {
+    matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
+fn is_shallow_dir(abs: &str) -> bool {
+    let rd = match std::fs::read_dir(abs) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    for entry in rd {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => return false,
+        };
+        let path = entry.path();
+        let meta = match std::fs::symlink_metadata(&path) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            // real subdirectory must be empty
+            let mut sub = match std::fs::read_dir(&path) {
+                Ok(r) => r,
+                Err(_) => return false,
+            };
+            if sub.next().is_some() {
+                return false;
+            }
+        }
+        // files and other entries are allowed
+    }
+    true
+}
+
+fn delete_shallow_dir(abs: &str) -> std::io::Result<()> {
+    let entries: Vec<std::fs::DirEntry> = std::fs::read_dir(abs)?.collect::<Result<_, _>>()?;
+    for entry in entries {
+        let path = entry.path();
+        let meta = std::fs::symlink_metadata(&path)?;
+        if meta.file_type().is_symlink() {
+            std::fs::remove_file(&path)?;
+        } else if meta.is_dir() {
+            std::fs::remove_dir(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    std::fs::remove_dir(abs)
+}
+
+fn handle_delete_dir_shallow(req: &Request, state: &State) -> Response {
+    let raw = match req.query.get("path") {
+        Some(p) if !p.is_empty() => p.clone(),
+        _ => return err(400, "Missing required query parameter: path", None),
+    };
+    let abs = resolve_path(&raw, &state.cwd);
+    if !lexists(&abs) {
+        return err(404, "Path does not exist", Some(&abs));
+    }
+    let is_link = std::fs::symlink_metadata(&abs)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if is_link || !std::path::Path::new(&abs).is_dir() {
+        return err(400, "Path is not a directory", Some(&abs));
+    }
+    if !is_shallow_dir(&abs) {
+        return err(400, "Directory is not shallow (contains a non-empty subdirectory)", Some(&abs));
+    }
+    match delete_shallow_dir(&abs) {
+        Ok(()) => {}
+        Err(e) => {
+            use std::io::ErrorKind::*;
+            return match e.kind() {
+                NotFound => err(404, "Path does not exist", Some(&abs)),
+                PermissionDenied => err(403, "Permission denied", Some(&abs)),
+                _ => err(400, &format!("Cannot delete directory: {e}"), Some(&abs)),
+            };
+        }
+    }
+    let mut o = serde_json::Map::new();
+    o.insert("path".to_string(), jstr(&raw));
+    o.insert("absolute_path".to_string(), jstr(&abs));
+    o.insert("deleted".to_string(), jstr("b:true"));
+    send_json_obj(200, &o)
+}
+
 fn handle_delete_dir(req: &Request, state: &State) -> Response {
+    if req.query.get("shallow").map(|v| is_truthy(v)).unwrap_or(false) {
+        return handle_delete_dir_shallow(req, state);
+    }
     let raw = match req.query.get("path") {
         Some(p) if !p.is_empty() => p.clone(),
         _ => return err(400, "Missing required query parameter: path", None),

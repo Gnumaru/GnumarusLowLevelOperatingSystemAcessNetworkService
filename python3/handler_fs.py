@@ -329,6 +329,10 @@ class HandlerFsMixin:
         })
 
     def _handle_delete_dir(self, query):
+        shallow_vals = query.get("shallow")
+        if shallow_vals and str(shallow_vals[0]).strip().lower() in ("1", "true", "yes", "on"):
+            self._handle_delete_dir_shallow(query)
+            return
         raw_paths = query.get("path")
         if not raw_paths or not raw_paths[0]:
             self._send_error_json(400, "Missing required query parameter: path")
@@ -342,6 +346,62 @@ class HandlerFsMixin:
                                   path=abs_path)
             return
         try:
+            os.rmdir(abs_path)
+        except FileNotFoundError:
+            self._send_error_json(404, "Path does not exist", path=abs_path)
+            return
+        except PermissionError:
+            self._send_error_json(403, "Permission denied", path=abs_path)
+            return
+        except OSError as exc:
+            self._send_error_json(400, "Cannot delete directory: %s" % exc,
+                                  path=abs_path)
+            return
+        self._send_json({
+            "path": raw_paths[0],
+            "absolute_path": abs_path,
+            "deleted": jenc(True),
+        })
+
+    def _handle_delete_dir_shallow(self, query):
+        raw_paths = query.get("path")
+        if not raw_paths or not raw_paths[0]:
+            self._send_error_json(400, "Missing required query parameter: path")
+            return
+        abs_path = resolve_path(raw_paths[0])
+        if not os.path.lexists(abs_path):
+            self._send_error_json(404, "Path does not exist", path=abs_path)
+            return
+        if os.path.islink(abs_path) or not os.path.isdir(abs_path):
+            self._send_error_json(400, "Path is not a directory",
+                                  path=abs_path)
+            return
+        try:
+            entries = os.listdir(abs_path)
+        except OSError as exc:
+            self._send_error_json(400, "Cannot delete directory: %s" % exc,
+                                  path=abs_path)
+            return
+        for name in entries:
+            sub = os.path.join(abs_path, name)
+            if os.path.isdir(sub) and not os.path.islink(sub):
+                try:
+                    if os.listdir(sub):
+                        self._send_error_json(
+                            400, "Directory is not shallow (contains a non-empty "
+                                 "subdirectory)", path=abs_path)
+                        return
+                except OSError as exc:
+                    self._send_error_json(400, "Cannot delete directory: %s" % exc,
+                                          path=abs_path)
+                    return
+        try:
+            for name in os.listdir(abs_path):
+                p = os.path.join(abs_path, name)
+                if os.path.isdir(p) and not os.path.islink(p):
+                    os.rmdir(p)
+                else:
+                    os.remove(p)
             os.rmdir(abs_path)
         except FileNotFoundError:
             self._send_error_json(404, "Path does not exist", path=abs_path)

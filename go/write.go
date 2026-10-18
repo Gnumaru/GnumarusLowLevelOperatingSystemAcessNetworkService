@@ -214,6 +214,10 @@ func handleDeleteFile(w http.ResponseWriter, q map[string][]string, opts Opts) {
 }
 
 func handleDeleteDir(w http.ResponseWriter, q map[string][]string, opts Opts) {
+	if isTruthy(firstQuery(q, "shallow")) {
+		handleDeleteDirShallow(w, q, opts)
+		return
+	}
 	raw := firstQuery(q, "path")
 	if raw == "" {
 		sendErr(w, 400, "Missing required query parameter: path", "")
@@ -250,6 +254,95 @@ func handleDeleteDir(w http.ResponseWriter, q map[string][]string, opts Opts) {
 	sendJSON(w, 200, map[string]any{
 		"path": raw, "absolute_path": abs, "deleted": mustEnc(true),
 	})
+}
+
+func isShallowDir(dir string) bool {
+	fh, err := os.Open(dir)
+	if err != nil {
+		return false
+	}
+	defer fh.Close()
+	entries, err := fh.Readdir(-1)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() && e.Mode()&os.ModeSymlink == 0 {
+			sub := filepath.Join(dir, e.Name())
+			sf, err := os.Open(sub)
+			if err != nil {
+				return false
+			}
+			names, _ := sf.Readdirnames(1)
+			sf.Close()
+			if len(names) > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func deleteShallowDirContents(dir string) error {
+	fh, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	names, err := fh.Readdirnames(-1)
+	fh.Close()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return err
+		}
+	}
+	return os.Remove(dir)
+}
+
+func handleDeleteDirShallow(w http.ResponseWriter, q map[string][]string, opts Opts) {
+	raw := firstQuery(q, "path")
+	if raw == "" {
+		sendErr(w, 400, "Missing required query parameter: path", "")
+		return
+	}
+	abs := resolvePath(raw, opts.Cwd)
+	if !lexists(abs) {
+		sendErr(w, 404, "Path does not exist", abs)
+		return
+	}
+	if li, err := os.Lstat(abs); err != nil || li.Mode()&os.ModeSymlink != 0 {
+		sendErr(w, 400, "Path is not a directory", abs)
+		return
+	} else if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+		sendErr(w, 400, "Path is not a directory", abs)
+		return
+	}
+	if !isShallowDir(abs) {
+		sendErr(w, 400, "Directory is not shallow (contains a non-empty subdirectory)", abs)
+		return
+	}
+	if err := deleteShallowDirContents(abs); err != nil {
+		if os.IsNotExist(err) {
+			sendErr(w, 404, "Path does not exist", abs)
+			return
+		}
+		if os.IsPermission(err) {
+			sendErr(w, 403, "Permission denied", abs)
+			return
+		}
+		sendErr(w, 400, fmt.Sprintf("Cannot delete directory: %v", err), abs)
+		return
+	}
+	sendJSON(w, 200, map[string]any{
+		"path": raw, "absolute_path": abs, "deleted": mustEnc(true),
+	})
+}
+
+func isTruthy(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 func isNotEmpty(dir string) bool {

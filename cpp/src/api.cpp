@@ -382,7 +382,9 @@ HttpResponse do_post(const HttpRequest& req, const ApiState& st) {
     if (req.path == "/api/socket/close") return sockws::handle_socket_close(req);
     if (req.path == "/api/socket/starttls") return sockws::handle_socket_starttls(req);
     if (req.path == "/" || req.path == "/api/help" ||
-        req.path == "/api/dir" || req.path == "/api/sysinfo" ||
+        req.path == "/api/dir" || req.path == "/api/dir/shallow" ||
+        req.path == "/api/shallow_dir" || req.path == "/api/dir_shallow" ||
+        req.path == "/api/sysinfo" ||
         req.path == "/api/socket/recv" || req.path == "/api/socket/ws")
         return send_json(
             405, jerr(405, "Method POST not supported for this route."));
@@ -392,6 +394,7 @@ HttpResponse do_post(const HttpRequest& req, const ApiState& st) {
 HttpResponse do_put(const HttpRequest& req, const ApiState& st) {
     if (req.path == "/api/file") return handle_overwrite_file(req, st);
     static const char* known[] = {"/",         "/api/help", "/api/dir",
+                                  "/api/dir/shallow", "/api/shallow_dir", "/api/dir_shallow",
                                   "/api/shell", "/api/sqlite/create",
                                   "/api/sqlite/query", "/api/sysinfo",
                                   "/api/socket/open", "/api/socket/send",
@@ -407,6 +410,8 @@ HttpResponse do_put(const HttpRequest& req, const ApiState& st) {
 HttpResponse do_delete(const HttpRequest& req, const ApiState& st) {
     if (req.path == "/api/file") return handle_delete_file(req, st);
     if (req.path == "/api/dir") return handle_delete_dir(req, st);
+    if (req.path == "/api/dir/shallow" || req.path == "/api/shallow_dir" || req.path == "/api/dir_shallow")
+        return handle_delete_dir_shallow(req, st);
     static const char* known[] = {"/",         "/api/help", "/api/shell",
                                   "/api/sqlite/create", "/api/sqlite/query",
                                   "/api/sysinfo", "/api/socket/open",
