@@ -98,7 +98,6 @@ module Gnumarus
                      "machine" => (RbConfig::CONFIG["host_cpu"] || ""),
                      "processor" => "",
                      "hostname" => hostname,
-                     "python_version" => "null",
                      "ruby_version" => RUBY_VERSION,
                      "cpu_count" => Tags.jenc(cpu),
                      "distro" => distro,

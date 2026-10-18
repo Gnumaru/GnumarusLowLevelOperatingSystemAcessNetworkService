@@ -166,7 +166,7 @@ json all_routes() {
         "GET", "/api/sysinfo", "system_info",
         "Return operating-system information about the host running the server. Takes no parameters.",
         json::array(),
-        "200 JSON { system, system_name, release, version, machine, processor, hostname, python_version, cpu_count, distro, windows, mac }. system is the raw platform name (Linux/Windows/Darwin); system_name is the friendly one (Darwin -> macOS). distro is parsed from /etc/os-release on Linux and null elsewhere; windows/mac objects appear only on those systems.",
+        "200 JSON { system, system_name, release, version, machine, processor, hostname, cpu_count, distro, windows, mac }. system is the raw platform name (Linux/Windows/Darwin); system_name is the friendly one (Darwin -> macOS). distro is parsed from /etc/os-release on Linux and null elsewhere; windows/mac objects appear only on those systems.",
         "401 missing/invalid token, 405 wrong method."));
     routes.push_back(route(
         "POST", "/api/socket/open", "socket_open",

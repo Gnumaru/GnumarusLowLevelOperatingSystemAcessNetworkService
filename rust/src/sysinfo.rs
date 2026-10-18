@@ -81,7 +81,6 @@ pub fn handle() -> Response {
     o.insert("machine".to_string(), jstr(std::env::consts::ARCH));
     o.insert("processor".to_string(), jstr(""));
     o.insert("hostname".to_string(), jstr(&hostname));
-    o.insert("python_version".to_string(), jstr("null"));
     o.insert(
         "rust_version".to_string(),
         jstr(option_env!("RUSTC_VERSION").unwrap_or("unknown")),

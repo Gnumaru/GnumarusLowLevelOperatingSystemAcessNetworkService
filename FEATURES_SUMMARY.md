@@ -27,7 +27,7 @@ Server version v0.10.0 (stdlib only, no frameworks):
 - `GET /api/oauth2/callback?code=&state=` — loopback redirect target (open route, no token, correlated by the random state): the service exchanges the code for tokens server-side and renders a small self-contained HTML page; `GET /api/oauth2/poll?id=` reads the state and hands back the short-lived access token (never the refresh token), `POST /api/oauth2/refresh?id=` mints a new access token, `POST /api/oauth2/close?id=` drops the session
 - The OAuth2 routes exist on the **Go reference only** for now (23 routes there; the other eight ports stay at 18 and their OAuth tests skip via capability probe)
 - `php/` runs sessions in `php/socketd.php` (supervisor + fork-per-session, spawned by `server.php`; 503 when unavailable); `filemanager.html` gains a socket panel + reusable `SocketSession` JS helper class
-- `GET /api/sysinfo` — OS/host info, no params: `{system, system_name, release, version, machine, processor, hostname, python_version, cpu_count, distro?, windows?, mac?}`
+- `GET /api/sysinfo` — OS/host info, no params: `{system, system_name, release, version, machine, processor, hostname, cpu_count, distro?, windows?, mac?}` plus a runtime-version field for managed/native runtimes (python_version, node_version, php_version, ruby_version, jvm_version/kotlin_version, dotnet_version, go_version, rust_version, cpp_version)
 - `DELETE /api/file?path=...` — delete a file; 400 if path is a directory
 - `DELETE /api/dir?path=...` — rmdir equivalent, empty directories only; 400 if not empty
 - `DELETE /api/dir/shallow?path=...` — delete a shallow directory (files, symlinks and empty subdirectories only); 400 if it contains a non-empty real subdirectory

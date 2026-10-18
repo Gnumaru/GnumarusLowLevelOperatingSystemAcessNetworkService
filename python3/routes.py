@@ -430,7 +430,7 @@ ROUTES = [
                        "running the server. Takes no parameters.",
         "params": [],
         "response": "200 JSON { system, system_name, release, version, "
-                    "machine, processor, hostname, python_version, "
+                    "machine, processor, hostname, "
                     "cpu_count, distro, windows, mac }. system is the raw "
                     "platform name (Linux/Windows/Darwin); system_name is "
                     "the friendly one (Darwin -> macOS). distro is parsed "

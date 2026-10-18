@@ -254,7 +254,7 @@ fun buildRoutes(): JsonArray {
     r.add(routeEntry("GET", "/api/sysinfo", "system_info",
         "Return operating-system information about the host running the server. Takes no parameters.",
         listOf(),
-        "200 JSON { system, system_name, release, version, machine, processor, hostname, python_version, cpu_count, distro, windows, mac }. system is the raw platform name (Linux/Windows/Darwin); system_name is the friendly one (Darwin -> macOS). distro is parsed from /etc/os-release on Linux and null elsewhere; windows/mac objects appear only on those systems.",
+        "200 JSON { system, system_name, release, version, machine, processor, hostname, cpu_count, distro, windows, mac }. system is the raw platform name (Linux/Windows/Darwin); system_name is the friendly one (Darwin -> macOS). distro is parsed from /etc/os-release on Linux and null elsewhere; windows/mac objects appear only on those systems.",
         "401 missing/invalid token, 405 wrong method."))
     r.add(routeEntry("GET", "/", "index",
         "Service index with version and pointer to /api/help.",
@@ -2388,7 +2388,6 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             "machine" to System.getProperty("os.arch", ""),
             "processor" to "",
             "hostname" to hostname,
-            "python_version" to "null",
             "jvm_version" to System.getProperty("java.version", ""),
             "kotlin_version" to KotlinVersion.CURRENT.toString(),
             "cpu_count" to jenc(Runtime.getRuntime().availableProcessors().toLong()),

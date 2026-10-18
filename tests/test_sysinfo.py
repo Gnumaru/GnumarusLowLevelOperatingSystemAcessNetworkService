@@ -11,16 +11,14 @@ class TestSysinfo(unittest.TestCase):
         status, _, data = get_json("/api/sysinfo")
         self.assertEqual(status, 200)
         for key in ("system", "system_name", "release", "version",
-                    "machine", "processor", "hostname", "python_version",
+                    "machine", "processor", "hostname",
                     "cpu_count", "distro", "windows", "mac"):
             self.assertIn(key, data)
         self.assertTrue(data["system"])
         self.assertTrue(data["system_name"])
         self.assertTrue(data["machine"])
-        # python_version is impl-defined: the CPython version string on
-        # the Python server, null on ports without a Python runtime
-        # (the Kotlin port reports jvm_version/kotlin_version instead).
-        self.assertIn("python_version", data)
+        # python_version is present only on the Python port; other
+        # runtimes report their own (managed) runtime version field.
         expected_name = {"Darwin": "macOS"}.get(data["system"],
                                                 data["system"])
         self.assertEqual(data["system_name"], expected_name)

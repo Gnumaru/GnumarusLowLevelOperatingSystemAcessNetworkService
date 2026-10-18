@@ -114,7 +114,6 @@ HttpResponse handle_sysinfo() {
     o["machine"] = machine;
     o["processor"] = "";
     o["hostname"] = hostname;
-    o["python_version"] = "null";
     o["cpp_version"] = __VERSION__;
     o["cpu_count"] = jenc_int(cpu);
     o["distro"] = distro;

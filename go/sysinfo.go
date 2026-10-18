@@ -74,7 +74,6 @@ func handleSysinfo(w http.ResponseWriter) {
 		"machine":     runtime.GOARCH,
 		"processor":   "",
 		"hostname":    hostname,
-		"python_version": "null",
 		"go_version":     runtime.Version(),
 		"cpu_count":      mustEnc(int64(cpu)),
 		"distro":         distro,
