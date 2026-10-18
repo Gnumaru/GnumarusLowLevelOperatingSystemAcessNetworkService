@@ -110,7 +110,7 @@ System information:
   system_name, release, version, machine, processor, hostname,
   python_version, cpu_count, distro?, windows?, mac?}`.
 
-Gmail OAuth2 (Go reference only):
+Gmail OAuth2 (all ports):
 
 - `POST /api/oauth2/start`, `GET /api/oauth2/callback`,
   `GET /api/oauth2/poll?id=`, `POST /api/oauth2/refresh?id=`,
@@ -137,8 +137,8 @@ Service index:
 | C# / .NET | `dotnet/` | `./dotnet/build.sh` | `dotnet dotnet/publish/gnumarus.dll` |
 | C++ | `cpp/` | `./cpp/build.sh` | `cpp/bin/gnumarus` |
 
-All ports share the same 19 routes; the Go reference adds the 5 Gmail
-OAuth2 routes (23 total). A unified launcher is provided:
+All ports share the same 24 routes, including the 5 Gmail
+OAuth2 routes. A unified launcher is provided:
 
 ```
 ./start.sh --runtime <name> [server args...]
@@ -205,11 +205,11 @@ All routes return JSON unless noted. Errors are JSON objects of the form
 | POST | `/api/socket/close?id=...` | socket_close |
 | GET | `/api/socket/ws?id=...` | socket_ws |
 | GET | `/api/sysinfo` | system_info |
-| POST | `/api/oauth2/start` | oauth2_start (Go only) |
-| GET | `/api/oauth2/callback` | oauth2_callback (Go only, open route) |
-| GET | `/api/oauth2/poll?id=...` | oauth2_poll (Go only) |
-| POST | `/api/oauth2/refresh?id=...` | oauth2_refresh (Go only) |
-| POST | `/api/oauth2/close?id=...` | oauth2_close (Go only) |
+| POST | `/api/oauth2/start` | oauth2_start (all ports) |
+| GET | `/api/oauth2/callback` | oauth2_callback (all ports, open route) |
+| GET | `/api/oauth2/poll?id=...` | oauth2_poll (all ports) |
+| POST | `/api/oauth2/refresh?id=...` | oauth2_refresh (all ports) |
+| POST | `/api/oauth2/close?id=...` | oauth2_close (all ports) |
 
 Use `GET /api/help` for the full machine-readable catalog, including
 parameter types and descriptions.

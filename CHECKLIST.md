@@ -154,3 +154,10 @@
 ## Shallow directory deletion route
 - [x] Implemented delete_directory_shallow in all runtimes (go, rust, python, nodejs, php, ruby, kotlin, dotnet, cpp)
 - [x] Added automated tests in tests/test_delete.py
+
+## OAuth2 on Rust and C++ ports
+- [x] Rust: implemented `rust/src/oauth2.rs` (session store, PKCE S256, server-side token exchange/refresh, HTTP client over TCP/TLS)
+- [x] Rust: wired `oauth2_start/poll/refresh/close/callback` into dispatch, check_auth open route, help catalog
+- [x] C++: implemented `cpp/src/api_oauth2.inc` (session store, PKCE S256, server-side token exchange/refresh, HTTP client over socket/TLS helpers)
+- [x] C++: wired `oauth2_start/poll/refresh/close/callback` into dispatch, check_auth open route, help catalog
+- [x] Verified: `tests/test_oauth2.py` passes (14/14) against both Rust and C++ ports

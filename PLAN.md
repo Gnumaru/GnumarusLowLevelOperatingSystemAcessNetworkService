@@ -874,3 +874,15 @@ implementing.
     (proton -> gmail, `127.0.0.1:1143` -> `imap.gmail.com:993`) and the
     end-to-end page load (fake IMAP -> Go proxy -> 2 rows, no JS
     errors) is green again. Full suite vs Go = 233 OK. STATUS: done.
+
+## Iteration 39 (OAuth2 on Rust and C++ ports)
+- Implemented the 5 Gmail OAuth2 routes on the Rust and C++ ports, which
+  previously kept 19 routes and skipped the OAuth tests.
+  - Rust: new `rust/src/oauth2.rs` (session store + sweeper + HTTP client
+    over TCP/TLS via the openssl crate), wired into `rust/src/api.rs`
+    dispatch/check_auth/help and `rust/src/help.rs`.
+  - C++: new `cpp/src/api_oauth2.inc` (session store + sweeper + HTTP
+    client over the existing socket/TLS helpers), wired into
+    `cpp/src/api.cpp` dispatch/check_auth/help and `cpp/src/routes.inc`.
+- Verified: `tests/test_oauth2.py` now passes (14/14) against both Rust
+  and C++ ports with no skips.

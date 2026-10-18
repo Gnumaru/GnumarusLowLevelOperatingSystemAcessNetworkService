@@ -187,7 +187,14 @@ std::map<std::string, std::string> load_file_config() {
     if (getcwd(cwd, sizeof(cwd)))
         candidates.push_back(std::string(cwd) + "/config.cfg");
     std::string ed = exe_dir();
-    if (!ed.empty()) candidates.push_back(ed + "/config.cfg");
+    if (!ed.empty()) {
+        candidates.push_back(ed + "/config.cfg");
+        // parent of exe dir (e.g. rust/ when binary is rust/bin/gnumarus)
+        size_t slash = ed.find_last_of("/\\");
+        if (slash != std::string::npos) {
+            candidates.push_back(ed.substr(0, slash) + "/config.cfg");
+        }
+    }
     for (auto& cand : candidates) {
         FILE* fh = fopen(cand.c_str(), "rb");
         if (!fh) continue;

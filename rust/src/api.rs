@@ -86,7 +86,7 @@ pub(crate) fn check_auth(req: &Request, state: &State) -> Option<Response> {
     if !state.auth_required {
         return None;
     }
-    if req.method == "GET" && (req.path == "/" || req.path == "/api/help") {
+    if req.method == "GET" && (req.path == "/" || req.path == "/api/help" || req.path == crate::oauth2::OAUTH_CALLBACK_PATH) {
         return None;
     }
     let mut supplied = String::new();
@@ -307,7 +307,7 @@ fn do_get(req: &Request, state: &State) -> Response {
             send_json_obj(200, &o)
         }
         "/api/shell" | "/api/sqlite/create" | "/api/sqlite/query" | "/api/socket/open" | "/api/socket/send"
-        | "/api/socket/close" | "/api/socket/starttls" => {
+        | "/api/socket/close" | "/api/socket/starttls" | "/api/oauth2/start" | "/api/oauth2/refresh" | "/api/oauth2/close" => {
             err(405, "Method GET not supported for this route (use POST).", None)
         }
         "/api/socket/recv" => crate::socket::handle_recv(req),
@@ -317,6 +317,8 @@ fn do_get(req: &Request, state: &State) -> Response {
             None,
         ),
         "/api/sysinfo" => handle_sysinfo(),
+        "/api/oauth2/poll" => crate::oauth2::handle_poll(req),
+        _ if req.path == crate::oauth2::OAUTH_CALLBACK_PATH => crate::oauth2::handle_callback(req),
         _ => err(404, &format!("Unknown route: {}", req.path), None),
     }
 }
@@ -331,7 +333,10 @@ fn do_post(req: &Request, state: &State) -> Response {
         "/api/socket/send" => crate::socket::handle_send(req),
         "/api/socket/close" => crate::socket::handle_close(req),
         "/api/socket/starttls" => crate::socket::handle_starttls(req),
-        "/" | "/api/help" | "/api/dir" | "/api/dir/shallow" | "/api/shallow_dir" | "/api/dir_shallow" | "/api/sysinfo" | "/api/socket/recv" | "/api/socket/ws" => {
+        "/api/oauth2/start" => crate::oauth2::handle_start(req),
+        "/api/oauth2/refresh" => crate::oauth2::handle_refresh(req),
+        "/api/oauth2/close" => crate::oauth2::handle_close(req),
+        "/" | "/api/help" | "/api/dir" | "/api/dir/shallow" | "/api/shallow_dir" | "/api/dir_shallow" | "/api/sysinfo" | "/api/socket/recv" | "/api/socket/ws" | "/api/oauth2/poll" | "/api/oauth2/callback" => {
             err(405, "Method POST not supported for this route.", None)
         }
         _ => err(404, &format!("Unknown route: {}", req.path), None),
@@ -359,6 +364,7 @@ fn do_put(req: &Request, state: &State) -> Response {
         "/api/socket/close",
         "/api/socket/starttls",
         "/api/socket/ws",
+        "/api/oauth2/start", "/api/oauth2/poll", "/api/oauth2/refresh", "/api/oauth2/close", "/api/oauth2/callback",
     ] {
         if req.path == known {
             return err(405, "Method PUT not supported for this route.", None);
@@ -390,6 +396,7 @@ fn do_delete(req: &Request, state: &State) -> Response {
         "/api/socket/close",
         "/api/socket/starttls",
         "/api/socket/ws",
+        "/api/oauth2/start", "/api/oauth2/poll", "/api/oauth2/refresh", "/api/oauth2/close", "/api/oauth2/callback",
     ] {
         if req.path == known {
             return err(405, "Method DELETE not supported for this route.", None);
@@ -412,7 +419,7 @@ fn handle_help(state: &State) -> Response {
     auth.insert(
         "open_routes".to_string(),
         serde_json::Value::Array(
-            ["/", "/api/help", "OPTIONS *"]
+            ["/", "/api/help", crate::oauth2::OAUTH_CALLBACK_PATH, "OPTIONS *"]
                 .iter()
                 .map(|s| jstr(s))
                 .collect(),

@@ -8,7 +8,7 @@ Server version v0.10.0 (stdlib only, no frameworks):
 - Open CORS on all responses + OPTIONS preflight (`Access-Control-Allow-Origin: *`)
 - `GET /` — service index with version and help pointer
 - Wire format: JSON carries only string/array/object. Numbers, booleans and nulls travel as tagged strings (`i:<int>`, `f:<float>`, `b:true|false`, `null`); fixed vocabulary and free text stay raw; sqlite row cells and `params` values are fully tagged (strings take an `s:` prefix). Query params stay plain.
-- `GET /api/help` — full route catalog: 19 shared routes on all nine ports (go/rust/python/nodejs/dotnet/php/ruby/cpp/kotlin) plus 5 Gmail OAuth2 service routes on go/python/nodejs/php/ruby/kotlin/dotnet (24 total there; rust and cpp still at 19): url, name, description, params
+- `GET /api/help` — full route catalog: 24 routes on all nine ports (go/rust/python/nodejs/dotnet/php/ruby/cpp/kotlin), including the 5 Gmail OAuth2 service routes: url, name, description, params
 - `GET /api/dir?path=...` — list directory contents with per-entry metadata (`name, path, type, size, atime, mtime, ctime, crtime, mode`; `crtime` null where the OS lacks birth time)
 - `GET /api/file?path=...[&encoding=auto|text|base64][&raw=1]` — read text and binary files (JSON auto/base64/text modes + raw bytes mode)
 - `POST /api/file?path=...` — create file, empty or with initial data (JSON `{content, encoding}` or raw bytes); 201 on success, 409 if exists
@@ -25,7 +25,7 @@ Server version v0.10.0 (stdlib only, no frameworks):
 - Transparent bytes both ways (e.g. browser SMTP/IMAP through the local service); same token auth; localhost-bind WARNING like shell (open network proxy by design)
 - `POST /api/oauth2/start` — start an OAuth 2.0 Authorization Code + PKCE session for a mail provider (Google defaults): JSON `{client_id, client_secret?, auth_url?, token_url?, scope?}` → 201 `{id, auth_url, redirect_uri, scope}`; the service mints state + PKCE S256, keeps the client secret, and holds the refresh token (see §36)
 - `GET /api/oauth2/callback?code=&state=` — loopback redirect target (open route, no token, correlated by the random state): the service exchanges the code for tokens server-side and renders a small self-contained HTML page; `GET /api/oauth2/poll?id=` reads the state and hands back the short-lived access token (never the refresh token), `POST /api/oauth2/refresh?id=` mints a new access token, `POST /api/oauth2/close?id=` drops the session
-- The OAuth2 routes exist on **go, python, nodejs, php, ruby, kotlin and dotnet** (24 routes each); rust and cpp remain at 19 routes and their OAuth tests skip via capability probe
+- The OAuth2 routes now exist on **all nine ports** (go, rust, python, nodejs, php, ruby, kotlin, dotnet, cpp); all OAuth tests run on every port
 - `php/` runs sessions in `php/socketd.php` (supervisor + fork-per-session, spawned by `server.php`; 503 when unavailable); `filemanager.html` gains a socket panel + reusable `SocketSession` JS helper class
 - `GET /api/sysinfo` — OS/host info, no params: `{system, system_name, release, version, machine, processor, hostname, cpu_count, distro?, windows?, mac?}` plus a runtime-version field for managed/native runtimes (python_version, node_version, php_version, ruby_version, jvm_version/kotlin_version, dotnet_version, go_version, rust_version, cpp_version)
 - `DELETE /api/file?path=...` — delete a file; 400 if path is a directory

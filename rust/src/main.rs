@@ -1,6 +1,7 @@
 //! Entry point: CLI, config resolution, server boot.
 
 mod api;
+mod oauth2;
 mod codec;
 mod config;
 mod help;

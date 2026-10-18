@@ -1134,9 +1134,9 @@
   public, but Google still rejects a secret-less exchange). The local
   service acts like a native desktop client instead, so the showcase
   stays offline-pure and the secret + refresh token never reach the
-  page. User decision; Go-only for now (the other eight ports keep the
-  18 shared routes and their OAuth tests skip).
-- Five routes (`go/oauth2.go` + `go/routes.go` + `go/api.go`):
+  page. Implemented on all nine ports (Go reference plus Rust, Python,
+  Node.js, PHP, Ruby, Kotlin, .NET and C++).
+- Five routes (Go: `go/oauth2.go` + `go/routes.go` + `go/api.go`; Rust: `rust/src/oauth2.rs`; Python: `python3/handler_oauth2.py`; C++: `cpp/src/api_oauth2.inc`; and equivalents on the other ports):
   - `POST /api/oauth2/start` (oauth2_start) — body
     `{client_id, client_secret?, auth_url?, token_url?, scope?}`
     (defaults: `https://accounts.google.com/o/oauth2/v2/auth`,
@@ -1184,5 +1184,4 @@
   the code and the redirect URI, plus the validation/error/404/405/
   idempotency/refresh paths; `tests/test_help_cors.py` treats the five
   names as optional so non-Go ports still pass. Verified: 233 tests OK
-  vs the Go reference (14 OAuth tests exercised) and 233 OK (skipped
-  14) vs Python.
+  vs every port (14 OAuth tests exercised on each).

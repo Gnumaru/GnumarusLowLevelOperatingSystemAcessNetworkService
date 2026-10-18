@@ -72,6 +72,9 @@ pub fn candidates() -> Vec<std::path::PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             out.push(dir.join(CONFIG_FILE_NAME));
+            if let Some(parent) = dir.parent() {
+                out.push(parent.join(CONFIG_FILE_NAME));
+            }
         }
     }
     out

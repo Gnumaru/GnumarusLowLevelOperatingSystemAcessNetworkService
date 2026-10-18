@@ -188,7 +188,7 @@ std::optional<HttpResponse> check_auth(const HttpRequest& req,
         return res;
     }
     if (!st.auth_required) return std::nullopt;
-    if (req.method == "GET" && (req.path == "/" || req.path == "/api/help"))
+    if (req.method == "GET" && (req.path == "/" || req.path == "/api/help" || req.path == "/api/oauth2/callback"))
         return std::nullopt;
     std::string supplied;
     auto it = req.headers.find("authorization");
@@ -323,6 +323,7 @@ std::string req_path(const HttpRequest& req, bool& missing) {
 #include "api_fs.inc"
 #include "api_shell.inc"
 #include "api_socket.inc"
+#include "api_oauth2.inc"
 #include "api_socket_ws.inc"
 #include "api_sqlite.inc"
 #include "api_sysinfo.inc"
@@ -336,7 +337,7 @@ HttpResponse do_get(const HttpRequest& req, const ApiState& st) {
     if (req.path == "/api/help") {
         json auth;
         auth["required"] = st.auth_required ? "b:true" : "b:false";
-        auth["open_routes"] = json::array({"/", "/api/help", "OPTIONS *"});
+        auth["open_routes"] = json::array({"/", "/api/help", "/api/oauth2/callback", "OPTIONS *"});
         auth["how"] =
             "Authorization: Bearer <token> header (preferred) or ?token= query parameter.";
         json obj;
@@ -358,7 +359,8 @@ HttpResponse do_get(const HttpRequest& req, const ApiState& st) {
     if (req.path == "/api/shell" || req.path == "/api/sqlite/create" ||
         req.path == "/api/sqlite/query" || req.path == "/api/socket/open" ||
         req.path == "/api/socket/send" || req.path == "/api/socket/close" ||
-        req.path == "/api/socket/starttls")
+        req.path == "/api/socket/starttls" || req.path == "/api/oauth2/start" ||
+        req.path == "/api/oauth2/refresh" || req.path == "/api/oauth2/close")
         return send_json(
             405, jerr(405, "Method GET not supported for this route (use POST)."));
     if (req.path == "/api/socket/recv") return sockws::handle_socket_recv(req);
@@ -367,6 +369,8 @@ HttpResponse do_get(const HttpRequest& req, const ApiState& st) {
             400, jerr(400, "This route requires a WebSocket upgrade "
                            "(Upgrade: websocket)."));
     if (req.path == "/api/sysinfo") return handle_sysinfo();
+    if (req.path == "/api/oauth2/poll") return handle_oauth2_poll(req, st);
+    if (req.path == "/api/oauth2/callback") return handle_oauth2_callback(req, st);
     return send_json(404, jerr(404, "Unknown route: " + req.path));
 }
 
@@ -381,11 +385,15 @@ HttpResponse do_post(const HttpRequest& req, const ApiState& st) {
     if (req.path == "/api/socket/send") return sockws::handle_socket_send(req);
     if (req.path == "/api/socket/close") return sockws::handle_socket_close(req);
     if (req.path == "/api/socket/starttls") return sockws::handle_socket_starttls(req);
+    if (req.path == "/api/oauth2/start") return handle_oauth2_start(req, st);
+    if (req.path == "/api/oauth2/refresh") return handle_oauth2_refresh(req, st);
+    if (req.path == "/api/oauth2/close") return handle_oauth2_close(req, st);
     if (req.path == "/" || req.path == "/api/help" ||
         req.path == "/api/dir" || req.path == "/api/dir/shallow" ||
         req.path == "/api/shallow_dir" || req.path == "/api/dir_shallow" ||
         req.path == "/api/sysinfo" ||
-        req.path == "/api/socket/recv" || req.path == "/api/socket/ws")
+        req.path == "/api/socket/recv" || req.path == "/api/socket/ws" ||
+        req.path == "/api/oauth2/poll" || req.path == "/api/oauth2/callback")
         return send_json(
             405, jerr(405, "Method POST not supported for this route."));
     return send_json(404, jerr(404, "Unknown route: " + req.path));
@@ -399,7 +407,9 @@ HttpResponse do_put(const HttpRequest& req, const ApiState& st) {
                                   "/api/sqlite/query", "/api/sysinfo",
                                   "/api/socket/open", "/api/socket/send",
                                   "/api/socket/recv", "/api/socket/close",
-                                  "/api/socket/starttls", "/api/socket/ws"};
+                                  "/api/socket/starttls", "/api/socket/ws",
+                                  "/api/oauth2/start", "/api/oauth2/poll", "/api/oauth2/refresh",
+                                  "/api/oauth2/close", "/api/oauth2/callback"};
     for (auto k : known)
         if (req.path == k)
             return send_json(
@@ -417,7 +427,9 @@ HttpResponse do_delete(const HttpRequest& req, const ApiState& st) {
                                   "/api/sysinfo", "/api/socket/open",
                                   "/api/socket/send", "/api/socket/recv",
                                   "/api/socket/close", "/api/socket/starttls",
-                                  "/api/socket/ws"};
+                                  "/api/socket/ws",
+                                  "/api/oauth2/start", "/api/oauth2/poll", "/api/oauth2/refresh",
+                                  "/api/oauth2/close", "/api/oauth2/callback"};
     for (auto k : known)
         if (req.path == k)
             return send_json(

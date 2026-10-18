@@ -239,6 +239,45 @@ json all_routes() {
         "101 Switching Protocols, then transparent bidirectional bytes (see description).",
         "400 not-an-upgrade / bad handshake / missing id / already attached, 404 unknown session, 405 wrong method."));
     routes.push_back(route(
+        "POST", "/api/oauth2/start", "oauth2_start",
+        "Create an OAuth 2.0 (Authorization Code + PKCE) session for a mail provider and return the authorization URL to open in a browser.",
+        json::array({
+            param("client_id", "body (JSON)", true, "string", "OAuth client id from the provider."),
+            param("client_secret", "body (JSON)", false, "string", "OAuth client secret."),
+            param("auth_url", "body (JSON)", false, "string", "Provider authorization endpoint (default: Google).", "https://accounts.google.com/o/oauth2/v2/auth", true, {}),
+            param("token_url", "body (JSON)", false, "string", "Provider token endpoint (default: Google).", "https://oauth2.googleapis.com/token", true, {}),
+            param("scope", "body (JSON)", false, "string", "Space-separated scopes (default: the Gmail IMAP scope).", "https://mail.google.com/", true, {})}),
+        "201 JSON { id, auth_url, redirect_uri, scope }.",
+        "400 missing client_id / bad JSON / bad auth_url or token_url / too many open sessions, 405 wrong method."));
+    routes.push_back(route(
+        "GET", "/api/oauth2/callback?code=<code>&state=<state>", "oauth2_callback",
+        "Loopback redirect target for the provider's OAuth consent page.",
+        json::array({
+            param("code", "query", false, "string", "Authorization code from the provider."),
+            param("state", "query", true, "string", "Opaque state minted at oauth2_start."),
+            param("error", "query", false, "string", "Provider error code when authorization failed."),
+            param("error_description", "query", false, "string", "Human-readable provider error text.")}),
+        "200/400 self-contained text/html page.",
+        "400 unknown/expired state or provider error, 405 wrong method."));
+    routes.push_back(route(
+        "GET", "/api/oauth2/poll?id=<id>", "oauth2_poll",
+        "Read the state of an OAuth session.",
+        json::array({param("id", "query", true, "string", "Session id from oauth2_start.")}),
+        "200 JSON { id, status (pending|exchanging|authorized|error) } plus, when authorized, { access_token, token_type, expires_in, scope }, or { error } on failure.",
+        "400 missing id, 404 unknown session, 405 wrong method."));
+    routes.push_back(route(
+        "POST", "/api/oauth2/refresh?id=<id>", "oauth2_refresh",
+        "Request a fresh access token from the refresh token the service kept.",
+        json::array({param("id", "query", true, "string", "Session id from oauth2_start (already authorized).")}),
+        "200 JSON { id, access_token, token_type, expires_in, scope }.",
+        "400 missing id / no refresh token yet / provider error, 404 unknown session, 405 wrong method."));
+    routes.push_back(route(
+        "POST", "/api/oauth2/close?id=<id>", "oauth2_close",
+        "Drop an OAuth session and forget its tokens.",
+        json::array({param("id", "query", true, "string", "Session id from oauth2_start.")}),
+        "200 JSON { id, closed: true }.",
+        "400 missing id, 404 unknown session, 405 wrong method."));
+    routes.push_back(route(
         "GET", "/", "index",
         "Service index with version and pointer to /api/help.",
         json::array(), "JSON { service, version, help }."));
