@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email Client Showcase (IMAP)</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>Email Client Showcase</h1>
+  <p class="sub">Read-only IMAP inbox over the low-level socket proxy
+  (WebSocket transport preferred, HTTP polling fallback). Sign in with
+  a password (LOGIN) or with Google OAuth2 (XOAUTH2, handled by the
+  local service); either way the inbox loads as soon as you are in.
+  Listing and
+  opening messages only — sending, deleting or flagging are not
+  implemented by design.</p>
+</header>
+
+<section id="connBar" aria-label="Connection">
+  <label>Server <input id="serverUrl" size="26" value="http://127.0.0.1:1423"></label>
+  <label>Token <input id="apiToken" type="password" size="20" placeholder="proxy token"></label>
+  <label>Provider
+    <select id="provider">
+      <option value="proton">Proton Mail (Bridge)</option>
+      <option value="gmail">Gmail</option>
+      <option value="outlook">Outlook</option>
+      <option value="icloud">iCloud Mail</option>
+      <option value="yahoo">Yahoo Mail</option>
+      <option value="custom">Custom (plaintext IMAP)</option>
+    </select>
+  </label>
+  <label>IMAP host <input id="imapHost" size="22" value="127.0.0.1"></label>
+  <label>Port <input id="imapPort" size="6" value="1143"></label>
+  <label>User <input id="imapUser" size="20" autocomplete="username"></label>
+  <label>Auth
+    <select id="authMode">
+      <option value="login">Password (LOGIN)</option>
+      <option value="oauth2">Google OAuth2 (XOAUTH2)</option>
+    </select>
+  </label>
+  <label id="passLabel">Password <input id="imapPass" type="password" size="16" autocomplete="current-password"></label>
+  <button id="connectBtn" type="button">Connect</button>
+  <button id="disconnectBtn" type="button" disabled>Disconnect</button>
+  <span id="dot" class="off" aria-hidden="true"></span>
+  <span id="statusText">Offline</span>
+</section>
+
+<section id="oauthPanel" class="oauth" aria-label="Google OAuth2" hidden>
+  <label>Client ID <input id="oauthClientId" size="42" autocomplete="off" placeholder="OAuth client id"></label>
+  <label>Client secret <input id="oauthClientSecret" type="password" size="24" autocomplete="off" placeholder="Desktop-app secret"></label>
+  <button id="signInBtn" type="button">Sign in with Google</button>
+  <button id="refreshTokenBtn" type="button" disabled>Refresh token</button>
+  <button id="signOutBtn" type="button" disabled>Forget token</button>
+  <span class="meta">Uses the Gmail preset (imap.gmail.com:993); signing in connects automatically.</span>
+  <span id="oauthStatus">Not signed in</span>
+  <span id="oauthLink" class="meta"></span>
+</section>
+
+<p id="tlsNote" class="warn" hidden></p>
+<p id="error" class="error" hidden></p>
+
+<section id="mailbox" aria-label="Inbox" hidden>
+  <h2>Inbox <span id="mboxInfo"></span></h2>
+  <div class="row">
+    <button id="prevBtn" type="button">← Newer</button>
+    <span id="pageInfo"></span>
+    <button id="nextBtn" type="button">Older →</button>
+    <label>Per page
+      <select id="pageSize">
+        <option value="10">10</option>
+        <option value="25" selected>25</option>
+        <option value="50">50</option>
+      </select>
+    </label>
+    <button id="reloadBtn" type="button">Reload</button>
+  </div>
+  <table id="msgTable">
+    <thead><tr><th></th><th>From</th><th>Subject</th><th>Date</th></tr></thead>
+    <tbody id="msgBody"></tbody>
+  </table>
+</section>
+
+<section id="viewer" aria-label="Message" hidden>
+  <h2 id="viewSubject">Message</h2>
+  <div id="viewHeaders" class="meta"></div>
+  <pre id="viewText"></pre>
+  <div id="attachList" class="meta"></div>
+  <div class="row"><button id="closeViewBtn" type="button">Back to list</button></div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Filemanager Showcase</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>Filemanager Showcase</h1>
+  <p class="sub">Pure HTML/CSS/JS file manager on top of the low-level
+  native-operations webservice (Go port). Every byte on screen came
+  from the API — no local filesystem access here.</p>
+</header>
+
+<section id="connBar" aria-label="Connection">
+  <label>Server <input id="serverUrl" size="26" value="http://127.0.0.1:1423"></label>
+  <label>Token <input id="apiToken" type="password" size="24" placeholder="paste server token"></label>
+  <button id="retryBtn" type="button">Connect</button>
+  <span id="dot" class="off" aria-hidden="true"></span>
+  <span id="statusText">Offline</span>
+  <span id="sysInfo"></span>
+</section>
+
+<p id="error" class="error" hidden></p>
+
+<section aria-label="Navigation">
+  <div id="crumbs"></div>
+  <div class="row">
+    <button id="upBtn" type="button">Up</button>
+    <button id="refreshBtn" type="button">Refresh</button>
+    <input id="pathInput" size="50" placeholder="/abs/or/relative/path">
+    <button id="goBtn" type="button">Go</button>
+  </div>
+</section>
+
+<section aria-label="Directory listing">
+  <h2>Directory <span id="dirCount"></span></h2>
+  <table id="dirTable">
+    <thead>
+      <tr>
+        <th>Name</th><th>Type</th><th>Size</th>
+        <th>Modified</th><th>Accessed</th><th>Changed</th><th>Created</th><th>Mode</th>
+      </tr>
+    </thead>
+    <tbody id="dirBody"></tbody>
+  </table>
+</section>
+
+<section aria-label="Create file">
+  <h2>New file</h2>
+  <div class="row">
+    <input id="newName" size="30" placeholder="name.txt (created inside current dir)">
+    <button id="createBtn" type="button">Create</button>
+    <button id="deleteDirBtn" type="button" title="Delete the current directory (must be empty)">Delete this dir</button>
+  </div>
+</section>
+
+<section id="viewer" aria-label="File viewer" hidden>
+  <h2 id="viewTitle">File</h2>
+  <div id="viewMeta" class="meta"></div>
+  <textarea id="viewText" rows="16" cols="90" spellcheck="false"></textarea>
+  <div class="row">
+    <button id="saveBtn" type="button">Save (overwrite)</button>
+    <button id="downloadBtn" type="button">Download (raw)</button>
+    <button id="deleteFileBtn" type="button">Delete file</button>
+    <button id="closeViewBtn" type="button">Close</button>
+  </div>
+  <p id="binaryNote" class="meta" hidden>Binary file: preview disabled, use Download.</p>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+:root { color-scheme: light dark; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0 auto; max-width: 1100px; padding: 1rem 1.25rem; line-height: 1.45;
+}
+header h1 { margin: 0 0 0.15rem; font-size: 1.5rem; }
+.sub { margin-top: 0; color: #666; font-size: 0.9rem; }
+#connBar {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+  padding: 0.6rem; border: 1px solid #ccc; border-radius: 8px; margin: 0.75rem 0;
+}
+#dot { width: 0.8em; height: 0.8em; border-radius: 50%; background: #c00; display: inline-block; }
+#dot.on { background: #0a0; }
+#dot.off { background: #c00; }
+#oauthPanel {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+  padding: 0.6rem; border: 1px solid #ccc; border-radius: 8px; margin: 0 0 0.75rem;
+  background: rgba(0, 120, 200, 0.06);
+}
+#oauthStatus.on { color: #0a0; }
+.oauth .meta, #oauthLink { font-size: 0.85rem; color: #555; }
+.error { background: #fde; border: 1px solid #c66; border-radius: 6px; padding: 0.5rem 0.75rem; }
+.warn { background: #ffe; border: 1px solid #cc6; border-radius: 6px; padding: 0.5rem 0.75rem; }
+.row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border: 1px solid #ccc; padding: 0.25rem 0.5rem; text-align: left; }
+th { background: #f0f0f0; }
+tr.unseen td { font-weight: bold; }
+button.linklike {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: #06c; text-decoration: underline; font-size: inherit; text-align: left;
+}
+.meta { font-size: 0.85rem; color: #555; }
+h2 { font-size: 1.15rem; margin: 1.25rem 0 0.4rem; }
+input, select, button { font: inherit; }
+#viewText {
+  white-space: pre-wrap; word-break: break-word; font-family: inherit;
+  border: 1px solid #ccc; border-radius: 6px; padding: 0.75rem; max-height: 60vh; overflow: auto;
+}
+@media (prefers-color-scheme: dark) {
+  .sub, .meta { color: #aaa; }
+  th { background: #222; }
+  th, td, #viewText { border-color: #555; }
+  #connBar { border-color: #555; }
+  #oauthPanel { border-color: #555; }
+}

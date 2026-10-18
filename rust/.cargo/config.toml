@@ -1,0 +1,3 @@
+# Cargo build config: keep big artifacts out of the project tree.
+[build]
+target-dir = "/home/user/.rust_target_dirs/GnumarusPythonNativeOperationsHttpService"

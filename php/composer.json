@@ -1,0 +1,14 @@
+{
+    "name": "gnumarus/native-ops-php",
+    "description": "Gnumarus native-operations HTTP service (PHP port on ReactPHP).",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.1",
+        "react/event-loop": "^1.5",
+        "react/socket": "^1.16",
+        "react/child-process": "^0.6"
+    },
+    "config": {
+        "vendor-dir": "vendor"
+    }
+}

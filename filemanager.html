@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gnumarus File Manager</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 1rem auto; padding: 0 1rem; }
+  header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  #dot { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 50%; background: gray; }
+  #dot.on { background: green; } #dot.off { background: red; }
+  #error { border: 1px solid red; padding: 0.5rem; margin: 0.5rem 0; white-space: pre-wrap; }
+  #toolbar, #createPanel, #viewer, #shellPanel, #sqlitePanel, #sysPanel { margin: 0.75rem 0; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  #pathInput { flex: 1; min-width: 12rem; }
+  #crumbs { margin: 0.5rem 0; }
+  #crumbs button { margin-right: 0.25rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border-bottom: 1px solid #8884; padding: 0.3rem 0.5rem; text-align: left; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge { font-size: 0.75rem; border: 1px solid; border-radius: 0.4rem; padding: 0 0.4rem; }
+  #viewer { border: 1px solid #8888; padding: 0.75rem; flex-direction: column; align-items: stretch; }
+  #viewer textarea { width: 100%; min-height: 12rem; font-family: monospace; }
+  #createPanel input { min-width: 10rem; } #createPanel textarea { width: 100%; min-height: 4rem; font-family: monospace; }
+  #shellPanel { flex-direction: column; align-items: stretch; border: 1px solid #8888; padding: 0.75rem; }
+  #socketPanel { flex-direction: column; align-items: stretch; border: 1px solid #8888; padding: 0.75rem; }
+  #sockSendText { width: 100%; min-height: 3rem; font-family: monospace; }
+  #sockOut { width: 100%; font-family: monospace; white-space: pre-wrap; background: #8882; padding: 0.5rem; min-height: 2rem; }
+  #shellCmd { width: 100%; font-family: monospace; }
+  #shellStdin { width: 100%; min-height: 3rem; font-family: monospace; }
+  #shellOut { width: 100%; font-family: monospace; white-space: pre-wrap; background: #8882; padding: 0.5rem; min-height: 2rem; }
+  #sqlitePanel { flex-direction: column; align-items: stretch; border: 1px solid #8888; padding: 0.75rem; }
+  #sqlitePanel input, #sqliteSql { width: 100%; }
+  #sqliteSql { min-height: 4rem; font-family: monospace; }
+  #sqliteOut { width: 100%; font-family: monospace; white-space: pre-wrap; background: #8882; padding: 0.5rem; min-height: 2rem; }
+  #sysPanel { align-items: center; }
+  .rowbtns { white-space: nowrap; }
+</style>
+</head>
+<body>
+<noscript>This file manager needs JavaScript.</noscript>
+<header>
+  <h1>Gnumarus File Manager</h1>
+  <span id="dot" title="server status"></span>
+  <span id="statusText">Connecting&hellip;</span>
+  <button id="retryBtn" type="button">Retry</button>
+  <label>token <input id="apiToken" type="password" placeholder="server API token" spellcheck="false"></label>
+</header>
+<div id="error" hidden></div>
+
+<div id="toolbar">
+  <button id="upBtn" type="button">Up</button>
+  <button id="refreshBtn" type="button">Refresh</button>
+  <input id="pathInput" type="text" value="/" spellcheck="false">
+  <button id="goBtn" type="button">Go</button>
+</div>
+<nav id="crumbs" aria-label="breadcrumb"></nav>
+
+<table>
+  <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<section id="createPanel" hidden>
+  <strong>New file</strong>
+  <input id="newName" type="text" placeholder="name.txt" spellcheck="false">
+  <textarea id="newContent" placeholder="initial text content (optional)" spellcheck="false"></textarea>
+  <button id="createBtn" type="button">Create</button>
+</section>
+
+<section id="viewer" hidden>
+  <strong id="viewName"></strong>
+  <div id="viewInfo"></div>
+  <textarea id="viewText" spellcheck="false"></textarea>
+  <div>
+    <button id="saveBtn" type="button">Save</button>
+    <button id="downloadBtn" type="button">Download</button>
+    <button id="closeViewBtn" type="button">Close</button>
+  </div>
+</section>
+
+<section id="shellPanel" hidden>
+  <strong>Shell (bash)</strong>
+  <input id="shellCmd" type="text" placeholder="e.g. ls -la | sort | head" spellcheck="false">
+  <div>
+    <input id="shellCwd" type="text" placeholder="working dir (optional)" spellcheck="false">
+    <label>max stdout (bytes) <input id="shellMaxOut" type="number" value="1048576" min="0"></label>
+    <label>max stderr (bytes) <input id="shellMaxErr" type="number" value="1048576" min="0"></label>
+    <button id="shellRunBtn" type="button">Run</button>
+  </div>
+  <div>
+    <textarea id="shellStdin" placeholder="stdin piped to the command (optional)" spellcheck="false"></textarea>
+    <label>stdin encoding
+      <select id="shellStdinEnc">
+        <option value="text" selected>text</option>
+        <option value="base64">base64</option>
+      </select>
+    </label>
+  </div>
+  <div id="shellOut">No command run yet.</div>
+</section>
+
+<section id="sqlitePanel" hidden>
+  <strong>SQLite</strong>
+  <div id="sqliteCreateRow">
+    <input id="sqliteNewPath" type="text" placeholder="/path/to/new.db" spellcheck="false">
+    <button id="sqliteCreateBtn" type="button">Create DB</button>
+  </div>
+  <div id="sqliteQueryRow">
+    <input id="sqliteDb" type="text" placeholder="/path/to/db.sqlite" spellcheck="false">
+    <textarea id="sqliteSql" placeholder="SELECT * FROM ..." spellcheck="false"></textarea>
+    <button id="sqliteRunBtn" type="button">Run Query</button>
+  </div>
+  <div id="sqliteOut">No query run yet.</div>
+</section>
+
+<section id="socketPanel" hidden>
+  <strong>Socket proxy (TCP)</strong>
+  <div>
+    <input id="sockHost" type="text" placeholder="host (e.g. 127.0.0.1)" spellcheck="false">
+    <input id="sockPort" type="text" placeholder="port (e.g. 25)" spellcheck="false" inputmode="numeric">
+    <button id="sockOpenBtn" type="button">Open</button>
+    <button id="sockCloseBtn" type="button">Close</button>
+    <label title="Use a WebSocket as the byte transport when the server supports it (falls back to HTTP polling)">
+      <input id="sockWs" type="checkbox" checked> WebSocket
+    </label>
+    <span id="sockState">No session.</span>
+  </div>
+  <div>
+    <textarea id="sockSendText" placeholder="bytes to send (UTF-8 text)" spellcheck="false"></textarea>
+    <button id="sockSendBtn" type="button">Send</button>
+    <button id="sockRecvBtn" type="button">Receive</button>
+  </div>
+  <div id="sockOut">No session open yet.</div>
+</section>
+
+<section id="sysPanel" hidden>
+  <strong>System</strong>
+  <div id="sysInfo"></div>
+</section>
+
+<script>
+"use strict";
+var SERVER = "http://127.0.0.1:1423";
+var MAX_PREVIEW = 512 * 1024;
+var caps = {};      // feature name -> true, from /api/help route names
+var online = false;
+var cwd = "/";
+
+function $(id) { return document.getElementById(id); }
+
+function showError(msg) {
+  var el = $("error");
+  el.textContent = msg;
+  el.hidden = false;
+}
+function clearError() { $("error").hidden = true; $("error").textContent = ""; }
+
+function setUnauthorized() {
+  online = false;
+  $("dot").className = "off";
+  $("statusText").textContent = "Unauthorized";
+  showError("Invalid or missing API token. Paste the token printed by " +
+    "the server (or start it with --no-auth) and press Retry.");
+}
+
+function authHeaders() {
+  var t = $("apiToken").value.trim();
+  return t ? { "Authorization": "Bearer " + t } : {};
+}
+
+function setOnline(ok, detail) {
+  online = ok;
+  $("dot").className = ok ? "on" : "off";
+  $("statusText").textContent = ok ? ("Online" + (detail ? " (" + detail + ")" : "")) : "Offline";
+  var controls = ["upBtn", "refreshBtn", "pathInput", "goBtn", "newName", "newContent",
+    "createBtn", "viewText", "saveBtn", "downloadBtn", "closeViewBtn",
+    "shellCmd", "shellCwd", "shellRunBtn", "shellMaxOut", "shellMaxErr",
+    "shellStdin", "shellStdinEnc",
+    "sqliteNewPath", "sqliteCreateBtn", "sqliteDb", "sqliteSql", "sqliteRunBtn",
+    "sockHost", "sockPort", "sockOpenBtn", "sockCloseBtn", "sockSendText",
+    "sockSendBtn", "sockRecvBtn", "sockWs"];
+  controls.forEach(function (id) { $(id).disabled = !ok; });
+  if (!ok) { showError(detail || ("Server not available at " + SERVER + ". Start it with: ./start.sh --runtime go")); }
+}
+
+function fmtSize(n) {
+  if (n == null) { return "-"; }
+  var units = ["B", "KB", "MB", "GB"];
+  var i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + " " + units[i];
+}
+function fmtTime(t) {
+  if (t == null) { return "-"; }
+  var d = new Date(t * 1000);
+  return isNaN(d.getTime()) ? "-" : d.toLocaleString();
+}
+/* Tagged wire values: "i:5" -> 5, "f:1.5" -> 1.5, "b:true" -> true,
+   "null" -> null, "s:x" -> "x". Raw strings pass through untouched. */
+function tv(s) {
+  if (typeof s !== "string") { return s; }
+  if (s === "null") { return null; }
+  if (s === "b:true") { return true; }
+  if (s === "b:false") { return false; }
+  if (s.charAt(0) === "i" && s.charAt(1) === ":") { return parseInt(s.slice(2), 10); }
+  if (s.charAt(0) === "f" && s.charAt(1) === ":") { return parseFloat(s.slice(2)); }
+  if (s.slice(0, 2) === "s:") { return s.slice(2); }
+  return s;
+}
+function tnum(s) {
+  var v = tv(s);
+  return (typeof v === "number") ? v : NaN;
+}
+/* Display text for a fully-tagged sqlite cell. */
+function cellText(c) {
+  if (c === "null") { return "NULL"; }
+  if (typeof c === "string" && c.slice(0, 2) === "s:") { return c.slice(2); }
+  if (typeof c === "string" && (c.slice(0, 2) === "i:" || c.slice(0, 2) === "f:")) {
+    return c.slice(2);
+  }
+  if (c === "b:true" || c === "b:false") { return c.slice(2); }
+  return String(c);
+}
+function parentDir(p) {
+  if (p === "/") { return "/"; }
+  var cut = p.replace(/\/+$/, "").split("/").slice(0, -1).join("/") || "/";
+  return cut;
+}
+
+function apiPath(route, params) {
+  var q = Object.keys(params || {}).map(function (k) {
+    return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]);
+  }).join("&");
+  return route + (q ? "?" + q : "");
+}
+
+function checkOnline() {
+  if (!online) { showError("Server is offline. Press Retry after starting it."); return false; }
+  return true;
+}
+
+function request(url, options) {
+  options = options || {};
+  options.headers = Object.assign({}, authHeaders(), options.headers || {});
+  return fetch(SERVER + url, options).then(function (res) {
+    var isJson = (res.headers.get("Content-Type") || "").indexOf("application/json") !== -1;
+    if (isJson) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    }
+    return res.blob().then(function (blob) { return { status: res.status, blob: blob }; });
+  }).then(function (out) {
+    if (out.status === 401) { setUnauthorized(); }
+    if (out.status < 200 || out.status >= 300) {
+      var msg = (out.data && (out.data.message || out.data.error)) || ("HTTP " + out.status);
+      throw new Error(msg);
+    }
+    return out.data !== undefined ? out.data : out.blob;
+  }).catch(function (err) {
+    if (err instanceof TypeError) {
+      setOnline(false);  // network failure: server down / unreachable
+      throw new Error("Cannot reach server at " + SERVER + ". Is it running?");
+    }
+    throw err;
+  });
+}
+
+function connect() {
+  clearError();
+  try {
+    if ($("apiToken").value.trim()) {
+      localStorage.setItem("gnumarus_token", $("apiToken").value.trim());
+    }
+  } catch (e) { /* storage unavailable (private mode): keep it in memory */ }
+  $("statusText").textContent = "Connecting…";
+  return request("/api/help", {}).then(function (data) {
+    caps = {};
+    (data.routes || []).forEach(function (r) { caps[r.name] = true; });
+    setOnline(true, (tv(data.count) || 0) + " endpoints");
+    applyCaps();
+    loadSysinfo();
+    return listDir(cwd);
+  }).catch(function (err) {
+    setOnline(false, String(err.message || err));
+  });
+}
+
+function applyCaps() {
+  // Show each UI block only when the server advertises the capability.
+  $("createPanel").hidden = !caps.create_file;
+  $("shellPanel").hidden = !caps.exec_shell;
+  $("socketPanel").hidden = !(caps.socket_open && caps.socket_send &&
+    caps.socket_recv && caps.socket_close);
+  $("sockWs").disabled = !caps.socket_ws;
+  if (!caps.socket_ws) { $("sockWs").checked = false; }
+  $("sqlitePanel").hidden = !(caps.sqlite_create || caps.sqlite_query);
+  $("sqliteCreateRow").hidden = !caps.sqlite_create;
+  $("sqliteQueryRow").hidden = !caps.sqlite_query;
+  document.querySelectorAll("[data-cap]").forEach(function (el) {
+    el.hidden = !caps[el.getAttribute("data-cap")];
+  });
+}
+
+function loadSysinfo() {
+  if (!caps.system_info) { $("sysPanel").hidden = true; return; }
+  request("/api/sysinfo", {}).then(function (data) {
+    var extra = data.distro && data.distro.pretty_name
+      ? data.distro.pretty_name
+      : (data.release || "");
+    if (data.windows && data.windows.edition) { extra += " " + data.windows.edition; }
+    if (data.mac && data.mac.version) { extra = data.mac.version; }
+    $("sysInfo").textContent = data.system_name + " " + extra +
+      " · " + (data.machine || "?") + " · host " + (data.hostname || "?");
+    $("sysPanel").hidden = false;
+  }).catch(function () { $("sysPanel").hidden = true; });
+}
+
+function listDir(path) {
+  if (!checkOnline()) { return Promise.resolve(); }
+  if (!caps.read_directory) { showError("Server does not support read_directory."); return Promise.resolve(); }
+  clearError();
+  return request(apiPath("/api/dir", { path: path }), {}).then(function (data) {
+    cwd = data.absolute_path;
+    $("pathInput").value = cwd;
+    renderCrumbs(cwd);
+    renderRows(data.entries || []);
+  }).catch(function (err) { showError("List failed: " + err.message); });
+}
+
+function renderCrumbs(path) {
+  var nav = $("crumbs");
+  nav.textContent = "";
+  var parts = path.split("/").filter(function (p) { return p !== ""; });
+  var btn = document.createElement("button");
+  btn.type = "button"; btn.textContent = "/";
+  btn.onclick = function () { listDir("/"); };
+  nav.appendChild(btn);
+  var acc = "";
+  parts.forEach(function (part) {
+    acc += "/" + part;
+    (function (target) {
+      var sep = document.createTextNode(" ");
+      nav.appendChild(sep);
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = part;
+      b.onclick = function () { listDir(target); };
+      nav.appendChild(b);
+    })(acc);
+  });
+}
+
+function renderRows(entries) {
+  var tb = $("rows");
+  tb.textContent = "";
+  entries.sort(function (a, b) {
+    var ad = a.type === "dir" ? 0 : 1, bd = b.type === "dir" ? 0 : 1;
+    return ad - bd || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  });
+  entries.forEach(function (e) {
+    var tr = document.createElement("tr");
+    var tdName = document.createElement("td");
+    if (e.type === "dir") {
+      var link = document.createElement("button");
+      link.type = "button"; link.textContent = e.name + "/";
+      link.onclick = function () { listDir(e.path); };
+      tdName.appendChild(link);
+    } else {
+      tdName.textContent = e.name;
+    }
+    var tdType = document.createElement("td");
+    var badge = document.createElement("span");
+    badge.className = "badge"; badge.textContent = e.type;
+    tdType.appendChild(badge);
+    var tdSize = document.createElement("td");
+    tdSize.className = "num"; tdSize.textContent = e.type === "dir" ? "-" : fmtSize(tnum(e.size));
+    var tdTime = document.createElement("td");
+    tdTime.className = "num"; tdTime.textContent = fmtTime(tnum(e.mtime));
+    var tdAct = document.createElement("td");
+    tdAct.className = "rowbtns";
+    if (e.type !== "dir" && caps.read_file) {
+      var v = document.createElement("button");
+      v.type = "button"; v.textContent = "View";
+      v.onclick = function () { viewFile(e.path); };
+      tdAct.appendChild(v);
+      var d = document.createElement("button");
+      d.type = "button"; d.textContent = "Download";
+      d.onclick = function () { downloadFile(e.path, e.name); };
+      tdAct.appendChild(d);
+    }
+    var canDel = (e.type === "dir" && caps.delete_directory) ||
+                 (e.type !== "dir" && caps.delete_file);
+    if (canDel) {
+      var del = document.createElement("button");
+      del.type = "button"; del.textContent = "Delete";
+      del.onclick = function () { deletePath(e); };
+      tdAct.appendChild(del);
+    }
+    tr.appendChild(tdName); tr.appendChild(tdType);
+    tr.appendChild(tdSize); tr.appendChild(tdTime); tr.appendChild(tdAct);
+    tb.appendChild(tr);
+  });
+}
+
+function viewFile(path) {
+  if (!checkOnline()) { return Promise.resolve(); }
+  clearError();
+  $("viewer").hidden = true;
+  return request(apiPath("/api/file", { path: path }), {}).then(function (data) {
+    $("viewName").textContent = data.absolute_path;
+    $("viewName").dataset.path = data.absolute_path;
+    if (tv(data.is_binary) === true || tnum(data.size) > MAX_PREVIEW) {
+      $("viewInfo").textContent = tv(data.is_binary) === true
+        ? ("Binary file (" + (data.mime_type || "unknown type") + ", " + fmtSize(tnum(data.size)) + "). Use Download.")
+        : ("Text file too large for preview (" + fmtSize(tnum(data.size)) + "). Use Download.");
+      $("viewText").value = "";
+      $("viewText").hidden = true;
+      $("saveBtn").hidden = true;
+    } else {
+      $("viewInfo").textContent = fmtSize(tnum(data.size)) + " of text.";
+      $("viewText").hidden = false;
+      $("viewText").value = data.content;
+      $("saveBtn").hidden = !caps.overwrite_file;
+    }
+    $("viewer").hidden = false;
+  }).catch(function (err) { showError("Open failed: " + err.message); });
+}
+
+function downloadFile(path, name) {
+  if (!checkOnline()) { return Promise.resolve(); }
+  clearError();
+  return request(apiPath("/api/file", { path: path, raw: "1" }), {}).then(function (blob) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name || "download";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }).catch(function (err) { showError("Download failed: " + err.message); });
+}
+
+function deletePath(entry) {
+  if (!checkOnline()) { return Promise.resolve(); }
+  if (!window.confirm("Delete " + entry.path + "?")) { return Promise.resolve(); }
+  clearError();
+  var route = entry.type === "dir" ? "/api/dir" : "/api/file";
+  return request(apiPath(route, { path: entry.path }), { method: "DELETE" }).then(function () {
+    if ($("viewer").hidden === false) { $("viewer").hidden = true; }
+    return listDir(cwd);
+  }).catch(function (err) { showError("Delete failed: " + err.message); });
+}
+
+$("goBtn").onclick = function () { listDir($("pathInput").value.trim() || "/"); };
+$("pathInput").addEventListener("keydown", function (ev) {
+  if (ev.key === "Enter") { listDir($("pathInput").value.trim() || "/"); }
+});
+$("upBtn").onclick = function () { listDir(parentDir(cwd)); };
+$("refreshBtn").onclick = function () { listDir(cwd); };
+$("retryBtn").onclick = function () { connect(); };
+
+$("createBtn").onclick = function () {
+  if (!checkOnline()) { return; }
+  var name = $("newName").value.trim();
+  if (!name) { showError("Type a file name first."); return; }
+  clearError();
+  var target = cwd.replace(/\/+$/, "") + "/" + name;
+  request(apiPath("/api/file", { path: target }), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: $("newContent").value, encoding: "text" })
+  }).then(function () {
+    $("newName").value = ""; $("newContent").value = "";
+    return listDir(cwd);
+  }).catch(function (err) { showError("Create failed: " + err.message); });
+};
+
+$("saveBtn").onclick = function () {
+  if (!checkOnline()) { return; }
+  clearError();
+  request(apiPath("/api/file", { path: $("viewName").dataset.path }), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: $("viewText").value, encoding: "text" })
+  }).then(function () { return listDir(cwd); })
+    .catch(function (err) { showError("Save failed: " + err.message); });
+};
+
+$("downloadBtn").onclick = function () {
+  var p = $("viewName").dataset.path;
+  var name = (p || "download").split("/").pop();
+  downloadFile(p, name);
+};
+$("closeViewBtn").onclick = function () { $("viewer").hidden = true; };
+$("shellRunBtn").onclick = function () { runShell(); };
+$("shellCmd").addEventListener("keydown", function (ev) {
+  if (ev.key === "Enter") { runShell(); }
+});
+function runShell() {
+  if (!checkOnline()) { return; }
+  var cmd = $("shellCmd").value.trim();
+  if (!cmd) { showError("Type a shell command first."); return; }
+  clearError();
+  $("shellOut").textContent = "Running…";
+  var body = { command: cmd };
+  var cwdVal = $("shellCwd").value.trim();
+  if (cwdVal) { body.cwd = cwdVal; }
+  var maxOut = parseInt($("shellMaxOut").value, 10);
+  var maxErr = parseInt($("shellMaxErr").value, 10);
+  if (isNaN(maxOut) || maxOut < 0 || isNaN(maxErr) || maxErr < 0) {
+    showError("Max stdout/stderr must be integers >= 0.");
+    return;
+  }
+  body.max_stdout = "i:" + maxOut;
+  body.max_stderr = "i:" + maxErr;
+  var stdinVal = $("shellStdin").value;
+  if (stdinVal) {
+    body.stdin = stdinVal;
+    body.stdin_encoding = $("shellStdinEnc").value;
+  }
+  request("/api/shell", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  }).then(function (data) {
+    var text = "exit code: " + tv(data.returncode) + (tv(data.timed_out) === true ? " (timed out)" : "") + "\n";
+    text += "--- stdout ---\n" + (data.stdout || "(empty)");
+    if (tv(data.stdout_truncated) === true) { text += "\n[truncated at " + tnum(data.max_stdout) + " bytes]"; }
+    text += "\n--- stderr ---\n" + (data.stderr || "(empty)");
+    if (tv(data.stderr_truncated) === true) { text += "\n[truncated at " + tnum(data.max_stderr) + " bytes]"; }
+    text += "\n(stdin: " + tv(data.stdin_bytes) + " byte(s) fed)";
+    $("shellOut").textContent = text;
+  }).catch(function (err) {
+    $("shellOut").textContent = "Failed: " + err.message;
+    showError("Shell failed: " + err.message);
+  });
+}
+
+/* WebSocket-like helper over the HTTP socket tunnel. Copy this into
+   any page to speak raw TCP through the local service:
+     var s = new SocketSession();
+     s.open("127.0.0.1", 25).then(function () { return s.sendText("EHLO x\r\n"); })
+       .then(function () { return s.recv(5); })
+       .then(function (r) { console.log(r.text, r.eof, r.timedOut); });
+   recv() resolves {bytes (Uint8Array), text, eof, timedOut}. */
+function SocketSession(server, headers) {
+  this.server = server || SERVER;
+  this.headers = headers || null;
+  this.id = null;
+}
+SocketSession.prototype._fetch = function (url, options) {
+  options = options || {};
+  var h = this.headers || authHeaders();
+  options.headers = Object.assign({}, h, options.headers || {});
+  var server = this.server;
+  return fetch(server + url, options).then(function (res) {
+    return res.json().then(function (data) {
+      if (!res.ok) {
+        throw new Error((data && data.message) || ("HTTP " + res.status));
+      }
+      return data;
+    });
+  });
+};
+SocketSession.prototype.open = function (host, port, timeoutSec) {
+  var self = this;
+  var body = { host: host, port: "i:" + port };
+  if (timeoutSec) { body.timeout = "i:" + timeoutSec; }
+  return this._fetch("/api/socket/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  }).then(function (data) { self.id = data.id; return data; });
+};
+SocketSession.prototype.sendText = function (text) {
+  if (this.ws && this.ws.readyState === 1) {
+    this.ws.send(text);
+    return Promise.resolve(new TextEncoder().encode(text).length);
+  }
+  var self = this;
+  return this._fetch(apiPath("/api/socket/send", { id: this.id }), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: text, encoding: "text" })
+  }).then(function (data) { return tnum(data.bytes); });
+};
+SocketSession.prototype.sendBase64 = function (b64) {
+  if (this.ws && this.ws.readyState === 1) {
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+    this.ws.send(bytes);
+    return Promise.resolve(bytes.length);
+  }
+  return this._fetch(apiPath("/api/socket/send", { id: this.id }), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: b64, encoding: "base64" })
+  }).then(function (data) { return tnum(data.bytes); });
+};
+SocketSession.prototype.recv = function (timeoutSec, maxBytes) {
+  var params = { id: this.id, timeout: String(timeoutSec || 5) };
+  if (maxBytes) { params.max_bytes = String(maxBytes); }
+  return this._fetch(apiPath("/api/socket/recv", params), {}).then(function (data) {
+    var bin = atob(data.content || "");
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+    var text;
+    try { text = new TextDecoder("utf-8", { fatal: false }).decode(bytes); }
+    catch (e) { text = bin; }
+    return { bytes: bytes, text: text, eof: tv(data.eof) === true, timedOut: tv(data.timed_out) === true };
+  });
+};
+SocketSession.prototype.close = function () {
+  var self = this;
+  if (this.ws) {
+    // Closing the WebSocket ends the whole session server-side.
+    try { this.ws.close(); } catch (e) { /* ignore */ }
+    this.ws = null;
+    this.id = null;
+    return Promise.resolve({});
+  }
+  return this._fetch(apiPath("/api/socket/close", { id: this.id }), {
+    method: "POST"
+  }).then(function (data) { self.id = null; return data; });
+};
+/* Open a session and attach a real WebSocket to it (preferred when
+   the server advertises socket_ws): after openWs resolves, sendText
+   / sendBase64 stream over the socket and incoming bytes arrive via
+   hooks.onMessage({bytes, text}); hooks.onClose fires with the close
+   event (the session is over: a WS close is a session close).
+     var s = new SocketSession();
+     s.openWs("127.0.0.1", 25, 0, {
+       onMessage: function (m) { console.log(m.text); },
+       onClose: function () { console.log("over"); }
+     }).then(function () { return s.sendText("EHLO x\r\n"); }); */
+SocketSession.prototype._wsToken = function () {
+  var h = this.headers || authHeaders();
+  var a = h["Authorization"] || h["authorization"] || "";
+  return a.slice(0, 7) === "Bearer " ? a.slice(7) : "";
+};
+SocketSession.prototype.openWs = function (host, port, timeoutSec, hooks) {
+  hooks = hooks || {};
+  var self = this;
+  if (typeof WebSocket === "undefined") {
+    return Promise.reject(new Error("WebSocket not available here."));
+  }
+  return this.open(host, port, timeoutSec).then(function () {
+    return new Promise(function (resolve, reject) {
+      var base = self.server.replace(/^http(s?):/, "ws$1:");
+      var params = { id: self.id };
+      var tok = self._wsToken();
+      if (tok) params.token = tok;
+      var ws;
+      try {
+        ws = new WebSocket(base + apiPath("/api/socket/ws", params));
+      } catch (e) { reject(e); return; }
+      ws.binaryType = "arraybuffer";
+      var settled = false;
+      ws.onopen = function () {
+        settled = true;
+        self.ws = ws;
+        resolve(ws);
+      };
+      ws.onerror = function () {
+        if (!settled) { settled = true; reject(new Error("WebSocket failed to open")); }
+        if (hooks.onError) hooks.onError();
+      };
+      ws.onclose = function (ev) {
+        self.id = null;
+        self.ws = null;
+        if (hooks.onClose) hooks.onClose(ev);
+      };
+      ws.onmessage = function (ev) {
+        var emit = function (bytes, text) {
+          if (hooks.onMessage) hooks.onMessage({ bytes: bytes, text: text });
+        };
+        if (typeof ev.data === "string") {
+          emit(new TextEncoder().encode(ev.data), ev.data);
+        } else {
+          var bytes = new Uint8Array(ev.data);
+          var text;
+          try { text = new TextDecoder("utf-8", { fatal: false }).decode(bytes); }
+          catch (e) { text = ""; }
+          emit(bytes, text);
+        }
+      };
+    });
+  });
+};
+
+var sockSession = new SocketSession();
+function sockState() {
+  var mode = sockSession.ws ? " (WS)" : "";
+  $("sockState").textContent = sockSession.id ? ("Open" + mode + ": " + sockSession.id) : "No session.";
+  $("sockRecvBtn").disabled = !online || !!sockSession.ws;
+}
+function sockAppend(text) {
+  var out = $("sockOut");
+  if (/^(Opening|Opened|No session)/.test(out.textContent)) out.textContent = "";
+  out.textContent += (out.textContent ? "\n" : "") + text;
+}
+$("sockOpenBtn").onclick = function () {
+  if (!checkOnline()) { return; }
+  var host = $("sockHost").value.trim();
+  var port = parseInt($("sockPort").value, 10);
+  if (!host || isNaN(port) || port < 1 || port > 65535) {
+    showError("Type a host and a TCP port 1-65535 first.");
+    return;
+  }
+  clearError();
+  $("sockOut").textContent = "Opening…";
+  var useWs = $("sockWs").checked && !!caps.socket_ws && typeof WebSocket !== "undefined";
+  var opened = useWs
+    ? sockSession.openWs(host, port, 0, {
+        onMessage: function (m) {
+          sockAppend("Received " + m.bytes.length + " byte(s)\n" + (m.text || "(empty)"));
+        },
+        onClose: function () {
+          sockAppend("[connection closed by peer or server]");
+          sockState();
+        }
+      })
+    : sockSession.open(host, port);
+  opened.then(function () {
+    $("sockOut").textContent =
+      "Opened TCP " + host + ":" + port + (useWs ? " over WebSocket." : ".");
+    sockState();
+  }).catch(function (err) {
+    $("sockOut").textContent = "Open failed: " + err.message;
+    showError("Socket open failed: " + err.message);
+  });
+};
+$("sockSendBtn").onclick = function () {
+  if (!checkOnline()) { return; }
+  if (!sockSession.id) { showError("Open a session first."); return; }
+  clearError();
+  var text = $("sockSendText").value;
+  sockSession.sendText(text).then(function (n) {
+    var line = "Sent " + n + " byte(s).";
+    if (sockSession.ws) { sockAppend(line); } else { $("sockOut").textContent = line; }
+  }).catch(function (err) {
+    $("sockOut").textContent = "Send failed: " + err.message;
+    showError("Socket send failed: " + err.message);
+  });
+};
+$("sockRecvBtn").onclick = function () {
+  if (!checkOnline()) { return; }
+  if (!sockSession.id) { showError("Open a session first."); return; }
+  clearError();
+  $("sockOut").textContent = "Waiting (up to 5s)…";
+  sockSession.recv(5).then(function (r) {
+    var note = r.eof ? " [peer closed]" : (r.timedOut ? " [no data in 5s]" : "");
+    $("sockOut").textContent = "Received " + r.bytes.length + " byte(s)" + note + "\n" + (r.text || "(empty)");
+  }).catch(function (err) {
+    $("sockOut").textContent = "Receive failed: " + err.message;
+    showError("Socket receive failed: " + err.message);
+  });
+};
+$("sockCloseBtn").onclick = function () {
+  if (!checkOnline()) { return; }
+  if (!sockSession.id) { showError("No session open."); return; }
+  clearError();
+  sockSession.close().then(function () {
+    $("sockOut").textContent = "Closed.";
+    sockState();
+  }).catch(function (err) {
+    $("sockOut").textContent = "Close failed: " + err.message;
+    showError("Socket close failed: " + err.message);
+  });
+};
+
+$("sqliteCreateBtn").onclick = function () {
+  if (!checkOnline()) { return; }
+  var dbPath = $("sqliteNewPath").value.trim();
+  if (!dbPath) { showError("Type a path for the new database first."); return; }
+  clearError();
+  $("sqliteOut").textContent = "Creating…";
+  request(apiPath("/api/sqlite/create", { path: dbPath }), { method: "POST" }).then(function (data) {
+    $("sqliteOut").textContent = "Created " + data.absolute_path +
+      " (SQLite " + data.sqlite_version + ", " + fmtSize(tnum(data.size)) + ").";
+    $("sqliteNewPath").value = "";
+    $("sqliteDb").value = data.absolute_path;
+    return listDir(cwd);
+  }).catch(function (err) {
+    $("sqliteOut").textContent = "Failed: " + err.message;
+    showError("Create DB failed: " + err.message);
+  });
+};
+
+$("sqliteRunBtn").onclick = function () {
+  if (!checkOnline()) { return; }
+  var dbPath = $("sqliteDb").value.trim();
+  var sql = $("sqliteSql").value.trim();
+  if (!dbPath) { showError("Type the database path first."); return; }
+  if (!sql) { showError("Type a SQL statement first."); return; }
+  clearError();
+  $("sqliteOut").textContent = "Running…";
+  request(apiPath("/api/sqlite/query", { path: dbPath }), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql: sql })
+  }).then(function (data) {
+    var text;
+    if (data.columns) {
+      text = data.columns.join(" | ") + "\n";
+      data.rows.forEach(function (row) {
+        text += row.map(function (cell) { return cellText(cell); }).join(" | ") + "\n";
+      });
+      text += "(" + tv(data.rowcount) + " row(s))";
+    } else {
+      text = "OK. rowcount: " + tv(data.rowcount) + ", lastrowid: " + tv(data.lastrowid);
+    }
+    $("sqliteOut").textContent = text;
+  }).catch(function (err) {
+    $("sqliteOut").textContent = "Failed: " + err.message;
+    showError("Query failed: " + err.message);
+  });
+};
+
+try {
+  $("apiToken").value = localStorage.getItem("gnumarus_token") || $("apiToken").value;
+} catch (e) { /* storage unavailable: token stays in memory only */ }
+
+connect();
+</script>
+</body>
+</html>

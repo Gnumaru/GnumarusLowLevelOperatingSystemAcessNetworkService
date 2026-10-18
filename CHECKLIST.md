@@ -1,0 +1,152 @@
+# CHECKLIST
+
+- [x] Write PLAN.md
+- [x] Write CHECKLIST.md (this file)
+- [x] Implement server.py v0.1.0 (stdlib only, CLI, CORS, /api/help, /api/dir, /api/file)
+- [x] Create fixtures under ./tmp for tests (text + binary files)
+- [x] Verify v0.1.0: start server, test /api/help, /, CORS/OPTIONS
+- [x] Verify v0.1.0: test /api/dir (ok + error cases)
+- [x] Verify v0.1.0: test /api/file text, binary auto, forced base64/text, raw mode + errors
+- [x] Write FEATURES_SUMMARY.md
+- [x] Write FEATURES_DETAIL.md
+- [x] Final review v0.1.0: read-only git status, update PLAN/CHECKLIST, report
+- [x] Extend server.py: POST /api/file (create), PUT /api/file (overwrite)
+- [x] Extend server.py: DELETE /api/file, DELETE /api/dir (rmdir empty only)
+- [x] Update /api/help ROUTES registry (8 routes total)
+- [x] Create tests/ (helpers, run_all.py, test_*.py per resource)
+- [x] Run full suite python3 tests/run_all.py, fix regressions
+- [x] Update FEATURES_SUMMARY.md + FEATURES_DETAIL.md, report
+- [x] Change default port to 1423 (server.py + docs + tests default)
+- [x] Create filemanager.html (single file, capability-driven UI)
+- [x] Verify: JS syntax check, regression suite, live exercise on :1423
+- [x] Update docs, report
+- [x] Implement POST /api/shell (bash -c, rc + separate stdout/stderr, timeout)
+- [x] Tests: tests/test_shell.py + help count 8 -> 9
+- [x] Shell console in filemanager.html (exec_shell capability)
+- [x] Verify: suite, live examples on :1423, headless smoke, docs, report
+- [x] Shell max_stdout/max_stderr (streaming truncated capture + flags)
+- [x] Filemanager shell limit fields (default 1MB) + truncation notes
+- [x] Tests for limits, full suite + live + headless, docs, report
+- [x] SQLite create (POST /api/sqlite/create) + query (POST /api/sqlite/query)
+- [x] Tests: tests/test_sqlite.py + help count 9 -> 11
+- [x] SQLite panel in filemanager.html, verify all, docs, report
+- [x] Token auth in server.py (--token/--no-auth, help open, 401s)
+- [x] Filemanager token field + 401 UX
+- [x] Tests: tests/test_auth.py, helpers/run_all token wiring
+- [x] Verify: suite, live, headless, docs, report
+- [x] GET /api/sysinfo (platform + distro info, no params)
+- [x] Tests: tests/test_sysinfo.py + help count 11 -> 12
+- [x] Sys readout in filemanager.html, verify all, docs, report
+- [x] Multi-source config in server.py (cli/env/stdin/config.cfg + guards)
+- [x] Tests: tests/test_config.py (precedence chain, guards, errors)
+- [x] stdin=DEVNULL in existing spawners, docs, full suite, report
+- [x] ~/ help docs (already supported) + tilde tests
+- [x] Verify: suite, docs, report
+- [x] Adapt to python3/ move + dir entries atime/ctime/crtime
+- [x] Verify: suite, docs, report
+- [x] Linux crtime via statx (+ tests + docs)
+- [x] Verify: suite, live vs stat, docs, report
+- [x] Verify: suite, docs, report
+- [x] Kotlin port: Main/Config/Api + Gradle build (Gson/JDBC/JNA)
+- [x] run_all --server-cmd override + sqlite skip wiring
+- [x] Full Python suite vs Kotlin server, fix parity gaps
+- [x] Docs, report
+- [x] Full suite vs PHP, fix parity, docs, report (+ ask: apt php8.5-sqlite3)
+- [x] Docs, report (no apt needed: pdo_sqlite was already present)
+- [x] Tagged scalars in Python + shared tests (tv + invariant)
+- [x] Tagged scalars in Kotlin + PHP + filemanager
+- [x] Suites x3 + headless, docs, report
+- [x] Node.js port: TS sources + npm build (core + node:sqlite)
+- [x] Full suite vs Node, fix parity, headless smoke
+- [x] Docs, report
+- [x] .NET port: console app + NuGet sqlite (HttpListener, core BCL)
+- [x] Probes (HttpListener/creation/kill), full suite vs .NET, parity
+- [x] Docs, report
+- [x] Go port: package main + modernc sqlite (stdlib + 1 dep)
+- [x] Full suite vs Go, fix parity, docs, report
+- [x] Rust port: cargo project + serde/sqlparser/rusqlite/libc, target-dir + bin/
+- [x] Full suite vs Rust (126/126), fix parity, headless smoke
+- [x] Docs, report
+- [x] Native SQL binding in Kotlin/PHP/Node/Go/.NET (scanners only for count/classify/translate)
+- [x] Suites x5, headless, docs, report
+- [x] Split python3/server.py into modules (flat package, zero deps kept)
+- [x] Full suite (behavior-proof), docs, report
+- [x] start.sh launcher (--port <name>, fwd args/stdin, fallback python)
+- [x] Verify all 7 ports + fallback + exit codes, docs, report
+- [x] start.bat for Windows cmd (same contract, reviewed + model-tested)
+- [x] Docs, report (bat NOT executed here: no cmd/wine)
+- [x] start.bat EXECUTED under wine cmd (found+fixed quoted-caret bug)
+- [x] start.ps1 for stock PowerShell 5.1 (5.1-safe syntax, tested on pwsh 7.5)
+- [x] Docs, report
+- [x] Shell stdin (stdin+stdin_encoding, writer thread, stdin_bytes) x7 ports
+- [x] Tests TestShellStdin + filemanager stdin UI, suites x7, docs, report
+- [x] C++ port: cmake + vendored nlohmann/json + sqlite amalgamation
+- [x] Full suite vs C++ (136/136), fix parity, headless smoke
+- [x] Docs, report
+- [x] Socket proxy: scope answers (TCP-only, HTTP tunnel+JS, socketd, panel)
+- [x] Reference impl in Python + tests/test_socket.py, suite green
+- [x] Ports x7 (Kotlin/PHP/Node/Go/.NET/Rust/C++), suite x8 (158/158), headless smoke
+- [x] Docs, report
+- [x] Go is the main reference port (run_all default -> go/gnumarus)
+- [x] WebSocket transport: Go reference (hand-rolled RFC 6455) + tests/test_socket_ws.py
+- [x] Go suite green 174/174 (close-wins design: WS end ends the session)
+- [x] WS in Python/Node/Rust/C++/.NET (suites green 174/174), Go reference green
+- [x] Kotlin/PHP documented as WS-unsupported, suite skips
+- [x] filemanager SocketSession.openWs + WS toggle, headless smoke
+- [x] Docs, report
+- [x] Host allowlist: Go reference (bind validation + gate check) + tests/test_host.py
+- [x] Same in python/node/rust/cpp/dotnet/kotlin/php, suites x8 green (186/170)
+- [x] Docs, report
+- [x] PHP on ReactPHP: composer.json + php/build.sh, spike green
+- [x] Full PHP rewrite (server/Api/socket/shell/WS), suite 186 green
+- [x] Docs, report
+- [x] showcase/filemanager webapp (html/css/js puros, só webservice)
+- [x] tests/test_showcase_filemanager.py green vs Go (192/192) + headless smoke
+- [x] Docs, report
+- [x] showcase/emailclient IMAP webapp (só proxy socket, WS+HTTP)
+- [x] tests/test_showcase_emailclient.py green vs Go (201/201) + headless smoke
+- [ ] Docs, report
+- [x] TLS sessions in Go (open tls/sni/ca_pem + starttls) + tests/test_socket_tls.py (213/213)
+- [x] Emailclient uses tls:true, suite green vs Go + headless smoke
+- [x] Docs, report
+- [x] WS handshake GUID fix (RFC 6455 `C5AB0DC85B11`): go/rust/python/nodejs/php/cpp + tests helper
+- [x] Suite asserts Sec-WebSocket-Accept (upgrade) + TestWsAcceptVector RFC vector (server-independent)
+- [x] Rebuilt rust/nodejs/c++ binaries; suites green vs python/rust/node/cpp (202) + php (202, incl. pre-attach flush fix)
+- [x] PHP pre-attach buffered-bytes flush (SocketStore::pumpBuffered after 101)
+- [ ] Rebuild go/gnumarus (no Go toolchain in this container) + browser retest vs Go
+- [x] TLS sessions on rust (openssl crate) + suite green
+- [x] TLS sessions on python (ssl stdlib) + suite green
+- [x] TLS sessions on nodejs (tls stdlib) + suite green
+- [x] TLS sessions on kotlin (JVM SSLSocket) + suite green
+- [x] TLS sessions on dotnet (SslStream) + suite green
+- [x] TLS sessions on php (stream_socket_enable_crypto) + suite green
+- [x] TLS sessions on c++ (system OpenSSL) + suite green
+- [x] Docs, report
+- [x] Ruby port: ruby/build.sh (sqlite3 gem -> ruby/vendor/gems) + hand-rolled HTTP/1.1 server
+- [x] Ruby: CLI/multi-source config precedence, loopback bind + Host allowlist, token auth, CORS, 18-route help catalog
+- [x] Ruby: dir/file CRUD, shell (pgroup + caps + stdin), sqlite (gem, 503 fallback), sysinfo, statx birth time
+- [x] Ruby: socket sessions + TLS (open tls/sni/ca_pem + starttls) + WebSocket bridge
+- [x] Ruby wired into start.sh + start.bat + start.ps1 (`--runtime ruby`; start.ps1 re-verified on pwsh 7.6.6)
+- [x] Full suite green vs Ruby (214 tests OK, 0 skipped: TLS + WS), FEATURES docs + start.sh + report
+- [x] Ruby fixes: rescue NameError (SSLZeroReturnError), Bridge utf8_valid? qualification, WS TCP pump polling (IO.select not close-woken)
+- [x] Kotlin: re-establish build toolchain locally in ./tmp (Gradle 9.8.1) + baseline suite (198 OK, 4 WS skips)
+- [x] Kotlin: replace JDK HttpServer with hand-rolled HTTP/1.1 server (Exchange abstraction)
+- [x] Kotlin: port WebSocket bridge (RFC 6455) from Go reference + `/api/socket/ws` route + help 17->18
+- [x] Kotlin: attached checks on send/recv/starttls; HTTP close kills bridge
+- [x] Full suite vs Kotlin green (214 tests, 0 skips, WS skips gone), start.sh smoke
+- [x] Docs (FEATURES_SUMMARY/DETAIL, run_all example cfg), report
+- [x] Launcher flag rename: first `--runtime <name>` selects the implementation; `--port` reserved for the TCP port (start.sh/start.bat/start.ps1)
+- [x] Rename verified (start.sh boots python/kotlin/go + forwards `--port`; start.bat under wine; start.ps1 under pwsh) + docs/filemanager hints updated
+- [x] Go: `go/oauth2.go` OAuth2 Authorization Code + PKCE service helper (session store, S256, server-side token exchange/refresh)
+- [x] Go: routes `oauth2_start/poll/refresh/close/callback` wired (help 18->23), callback an open route, 405 lists updated
+- [x] Tests: `tests/test_oauth2.py` (capability-gated, local fake Google verifies PKCE/tokens) + optional-name set + showcase XOAUTH2 coverage
+- [x] Showcase emailclient: auth-mode selector (LOGIN vs XOAUTH2), OAuth sign-in/poll/refresh, Gmail preset note
+- [x] Full suite green vs Go (232 OK, 14 OAuth run) and vs Python (232 OK, 14 skip); docs + report
+- [x] Gmail OAuth2: auto-connect after a successful sign-in (inbox opens like a password Connect)
+- [x] loadUids: scan any untagged `* SORT`/`* SEARCH` line + SEARCH fallback when SORT is empty (Gmail has no SORT)
+- [x] parseFetchHeaders: find `UID` anywhere in the FETCH record; name the failing command in `cmd`/`authXoauth2` errors
+- [x] Tests: js_emailclient_auth harness covers loadUids/parseFetchHeaders/autoConnect + FakeGmailImap proxy script
+- [x] Full suite green vs Go + docs (FEATURES_SUMMARY/DETAIL), report
+- [x] Auth/Provider alignment: choosing Google OAuth2 selects the Gmail preset (imap.gmail.com:993); provider persisted + aligned on load
+- [x] Popup close no longer triggers the COOP warning (callback page closes itself; only a blank popup is closed by the opener)
+- [x] Harness covers the alignment (29 checks); headless Chrome smoke + end-to-end page load green; full suite 233 OK
