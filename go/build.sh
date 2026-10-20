@@ -4,6 +4,6 @@ set -e
 cd "$(dirname "$0")"
 export GOFLAGS=-mod=mod
 go mod tidy
-go build -o gnumarus .
-echo "built: gnumarus"
-echo "run:   ./gnumarus [--host H] [--port P] [--token T] [--auth|--no-auth]"
+go build -o GnumarusOSBridge .
+echo "built: GnumarusOSBridge"
+echo "run:   ./GnumarusOSBridge [--host H] [--port P] [--token T] [--auth|--no-auth]"
