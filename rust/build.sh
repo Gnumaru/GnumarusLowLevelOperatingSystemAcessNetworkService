@@ -7,8 +7,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 export CARGO_NET_IPV4_ONLY=true
 export CARGO_TARGET_DIR="$HOME/.rust_target_dirs/GnumarusPythonNativeOperationsHttpService"
 cargo build --release
-BIN="$CARGO_TARGET_DIR/release/gnumarus"
+BIN="$CARGO_TARGET_DIR/release/GnumarusOSBridge"
 mkdir -p bin
-cp "$BIN" bin/gnumarus
-echo "built: bin/gnumarus"
-echo "run:   ./bin/gnumarus [--host H] [--port P] [--token T] [--auth|--no-auth]"
+cp "$BIN" bin/GnumarusOSBridge
+chmod +x bin/GnumarusOSBridge
+echo "built: bin/GnumarusOSBridge"
+echo "run:   ./bin/GnumarusOSBridge [--host H] [--port P] [--token T] [--auth|--no-auth]"

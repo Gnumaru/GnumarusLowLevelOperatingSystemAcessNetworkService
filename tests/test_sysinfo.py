@@ -43,6 +43,25 @@ class TestSysinfo(unittest.TestCase):
         status, _, _ = request("POST", "/api/sysinfo")
         self.assertEqual(status, 405)
 
+    def test_single_runtime_version_field(self):
+        """At most one runtime-version field, and never a native one.
+
+        Managed runtimes report the version of the runtime that executes
+        them (python_version, node_version, php_version, ruby_version,
+        jvm_version/kotlin_version, dotnet_version). Native runtimes
+        (Go, Rust, C++) report none.
+        """
+        managed = ("python_version", "node_version", "php_version",
+                   "ruby_version", "jvm_version", "kotlin_version",
+                   "dotnet_version")
+        native = ("go_version", "rust_version", "cpp_version")
+        status, _, data = get_json("/api/sysinfo")
+        self.assertEqual(status, 200)
+        present = [k for k in managed + native if k in data]
+        self.assertLessEqual(len(present), 1, present)
+        for key in native:
+            self.assertNotIn(key, data)
+
 
 if __name__ == "__main__":
     unittest.main()

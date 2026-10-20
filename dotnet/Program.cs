@@ -4,7 +4,7 @@
 /// Gnumarus native-operations HTTP service (C#/.NET port).
 ///
 /// Usage:
-///     dotnet publish/gnumarus.dll [--host H] [--port P] [--token TEXT] [--no-auth | --auth]
+///     dotnet publish/GnumarusOSBridge.dll [--host H] [--port P] [--token TEXT] [--no-auth | --auth]
 ///
 /// Settings resolve as: CLI flag > GNUMARUS_* env var > stdin key=value
 /// lines > dotnet/publish/config.cfg (also checked next to the working
@@ -15,7 +15,7 @@ static class Program
     static void Usage()
     {
         Console.Error.WriteLine(
-            "Usage: dotnet publish/gnumarus.dll [--host HOST] [--port PORT] [--token TOKEN] [--no-auth | --auth]\n" +
+            "Usage: dotnet publish/GnumarusOSBridge.dll [--host HOST] [--port PORT] [--token TOKEN] [--no-auth | --auth]\n" +
             "\nEvery setting can also come from a GNUMARUS_* environment variable\n" +
             "(GNUMARUS_HOST/PORT/TOKEN/NO_AUTH), from stdin key=value lines, or from\n" +
             "config.cfg (working dir, executable dir or publish dir).\n" +

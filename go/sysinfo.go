@@ -66,6 +66,10 @@ func handleSysinfo(w http.ResponseWriter) {
 		systemName = "macOS"
 	}
 	kernelRelease, kernelVersion := kernelInfo()
+	// NOTE: no runtime-version field here. Managed runtimes report the
+	// version of the runtime that executes them (python_version,
+	// node_version, php_version, ruby_version, jvm_version,
+	// dotnet_version); native ones (Go, Rust, C++) do not report one.
 	sendJSON(w, 200, map[string]any{
 		"system":      system,
 		"system_name": systemName,
@@ -74,11 +78,10 @@ func handleSysinfo(w http.ResponseWriter) {
 		"machine":     runtime.GOARCH,
 		"processor":   "",
 		"hostname":    hostname,
-		"go_version":     runtime.Version(),
-		"cpu_count":      mustEnc(int64(cpu)),
-		"distro":         distro,
-		"windows":        windows,
-		"mac":            mac,
+		"cpu_count":   mustEnc(int64(cpu)),
+		"distro":      distro,
+		"windows":     windows,
+		"mac":         mac,
 	})
 }
 

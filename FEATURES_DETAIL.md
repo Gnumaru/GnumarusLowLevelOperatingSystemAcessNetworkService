@@ -1,5 +1,12 @@
 # FEATURES_DETAIL
 
+This file describes the whole service. The **Go port (`go/`) is the
+reference implementation** (see §22); the other eight ports mirror
+it route for route, status for status and field for field. Sections
+numbered 1-19 describe the contract itself (the Python port is the
+original implementation of it), the numbered port sections describe the
+per-runtime differences.
+
 ## 1. CLI Server (`python3/`)
 
 - Stdlib only: `http.server.ThreadingHTTPServer`, `argparse`, `json`, `base64`, `mimetypes`. No pip dependencies.
@@ -38,13 +45,16 @@
 - Each param: `{ name, location, required, type, default?, allowed?, description }`.
 - The `auth` block tells clients the policy (required flag, always-open
   routes `/`, `/api/help`, the OAuth loopback callback
-  `/api/oauth2/callback` where implemented, and `OPTIONS *`, and how to
+  `/api/oauth2/callback`, and `OPTIONS *`, and how to
   send the token).
+- The catalog is identical on all nine ports: the same 24 routes, in
+  the same order, with the same parameters (`tests/test_help_cors.py`
+  asserts the exact set).
 
 ## 14. Token Authentication
 
 - Everything except `GET /`, `GET /api/help`, `GET /api/oauth2/callback`
-  (where implemented) and `OPTIONS` preflight
+  and `OPTIONS` preflight
   requires the API token: `Authorization: Bearer <token>` header
   (preferred — query strings leak into logs) or `?token=` (handy for
   direct download links).
@@ -65,7 +75,8 @@
 
 - `path` (required): absolute or relative (resolved against server CWD, `~` expanded, normalized). All six file endpoints accept `~/` paths expanding to the server user's home directory (documented in `/api/help` since v0.7.1).
 - Times (epoch float seconds): `atime` last access, `mtime` last content modification, `ctime` last status change (doubles as creation time on Windows), `crtime` file creation/birth — from `st_birthtime` where exposed (macOS/Windows), else a Linux-only ctypes `statx(STATX_BTIME)` lookup with `stx_mask` check, else `null` (old kernels, filesystems without birth time). Measured: one extra syscall per entry (~0.2 ms/entry for full listings) vs ~6.7 ms/entry for a `stat` subprocess, with no text parsing involved.
-- Success (200): `{ path, absolute_path, count, entries }`, entries sorted by name, each `{ name, path, type, size, mtime, mode }` where `type` is `file|dir|symlink|other`, `mtime` is epoch float, `mode` is octal permission string (e.g. `0o664`).
+- The `statx(2)` call must request the bits it wants: `STATX_BTIME` (0x800) for the birth time **and** `STATX_CTIME` (0x80) for the change time — the kernel leaves the other timestamps zeroed. A port that asks only for `STATX_BTIME` and then reads `stx_ctime` reports `ctime: f:0` instead of the real change time (that was the Go and Kotlin bug, fixed; the suite now compares `ctime` against `stat -c %Z`).
+- Success (200): `{ path, absolute_path, count, entries }`, entries sorted by name, each `{ name, path, type, size, atime, mtime, ctime, crtime, mode }` where `type` is `file|dir|symlink|other`, the times are epoch floats, and `mode` is the octal permission string (e.g. `0o664`).
 - Errors (JSON `{ error, message, path? }`): `400` missing path / not-a-directory, `404` not found, `403` permission / OS error.
 
 ## 6. `GET /api/file?path=<path>[&encoding=...][&raw=1]` (read_file)
@@ -76,7 +87,10 @@
   - `text`: forces UTF-8 decode with `errors="replace"`.
   - `base64`: forces base64 (works for text and binary).
   - `mime_type` via `mimetypes.guess_type`, fallback `application/octet-stream`.
-- Raw mode (`raw=1`): responds with raw file bytes, guessed `Content-Type`, `Content-Length`, plus CORS headers. Useful for `<img>`, downloads, etc.
+- Raw mode (`raw=1`): responds with raw file bytes and a guessed
+  `Content-Type`, plus CORS headers. Useful for `<img>`, downloads, etc.
+  (The Go port streams the body with `Transfer-Encoding: chunked`; the
+  Python and Node ports set `Content-Length`.)
 - Errors: `400` missing path / is-a-directory / invalid encoding, `404` not found, `403` permission / OS error.
 - Verified: text roundtrip, binary base64 roundtrip (`00 01 02 FF FE 00 41 42 43`), forced modes, raw bytes, all error cases (22 checks passing).
 
@@ -115,37 +129,49 @@
 - `DELETE /api/dir?path=...` (delete_directory): `rmdir` equivalent —
   only empty directories. Success `200 { ..., deleted: true }`.
   Errors: `400` missing path / not-a-directory / not-empty,
-  `404` not found, `403` permission.
+  `404` not found, `403` permission. The optional `shallow` query
+  parameter (`0` by default, allowed `0`/`1`) switches to the shallow
+  deletion described next; it is advertised in the help catalog.
 - `DELETE /api/dir/shallow?path=...` (delete_directory_shallow): deletes a
   shallow directory containing only files (including symlinks) and empty
   subdirectories. Fails when it contains a non-empty real subdirectory.
   Does not delete recursively. Success `200 { ..., deleted: true }`.
   Errors: `400` missing path / not-a-directory / not-shallow, `404` not
   found, `403` permission.
+  The same behavior is reachable three more ways, on every port:
+  `DELETE /api/dir?path=...&shallow=1`, and the path aliases
+  `/api/shallow_dir` and `/api/dir_shallow`.
 
 ## 10. Regression Suite (`tests/`)
 
-- Stdlib only (`unittest` + `http.client`, no pytest).
+- Stdlib only (`unittest` + `http.client`, no pytest). 241 tests.
 - `run_all.py [--server-cmd CMD] [--server-cfg PATH]` runs the whole
   black-box suite against another implementation with the same
   CLI/HTTP contract (e.g. the Kotlin port); sub-server tests follow
   via `GNATIVE_TEST_SERVER_CMD`/`GNATIVE_TEST_CFG`. `--server-cfg`
   is required with `--server-cmd`. SQLite tests
   self-skip when the server reports no support (`GNATIVE_TEST_SQLITE`).
+- The suite is the contract gate between the nine ports: it asserts the
+  exact 24-route catalog of `/api/help` (not "at least"), the `shallow`
+  parameter of `delete_directory`, that `/api/sysinfo` carries at most
+  one runtime-version field and never a native one, that `ctime` matches
+  `stat -c %Z`, and the wire invariant (no JSON number/boolean/null
+  after parsing) on every response.
 
 ## 18. PHP Port (`php/`)
 
-- Same service, same contract: all 12 routes, same URLs/statuses/JSON
-  shapes, same CLI flags, same config precedence (CLI > `GNUMARUS_*`
-  > stdin > `php/config.cfg` > default), same token auth. Zero
-  composer dependencies (core + pdo_sqlite only).
+- Same service, same contract: the same 24 routes as every other port,
+  same URLs/statuses/JSON shapes, same CLI flags, same config precedence
+  (CLI > `GNUMARUS_*` > stdin > `php/config.cfg` > default), same token
+  auth. Composer dependencies: `react/socket` + `react/event-loop` +
+  `react/child-process` (plus `pdo_sqlite` for the SQLite routes).
 - Layout: `php/server.php` (CLI entry: resolves config, prints the
-  `config sources:` summary, then spawns `php -S` with the resolved
-  values exported as env so every worker router resolves
-  identically) + `php/router.php` (front controller: handles every
-  request, never returns false, so no static file is ever served) +
-  `php/src/Config.php` + `php/src/Api.php`. Run `php php/server.php`.
-  Workers via `PHP_CLI_SERVER_WORKERS=8`, Ctrl+C forwarded with pcntl.
+  `config sources:` summary, then boots a single long-lived ReactPHP
+  event-loop process) + `php/src/{Config,Api,Http,HttpServer,SocketStore,
+  WsProto,SocketProto}.php`. Run `php php/server.php`. The hand-rolled
+  HTTP/1.1 layer lives in `php/src/HttpServer.php` so the WebSocket
+  upgrade can hijack the connection (see §31); there is no `php -S`
+  worker pool and no socket daemon anymore.
 - Faithful details: exclusive create via `fopen(..,'xb')`, clearstatcache
   per request (long-lived workers), `setsid`-based process-group kill
   on shell timeout (killpg parity), PDO busy timeout + `PRAGMA
@@ -153,16 +179,17 @@
   expansion, `/etc/os-release` parsing.
 - Known impl differences (documented, not bugs): `atime/mtime/ctime`
   are ints (PHP `lstat` has no sub-second precision); `crtime` is
-  always null on Linux (no birth-time API; FFI is blocked); no
-  `python_version` (see `php_version`); 503 `sqlite_unavailable` when
-  pdo_sqlite is missing (suite then skips SQLite).
-- Verified: shared suite 123/123 against it (1 documented skip),
-  123/123 against Python and Kotlin after the harness changes, plus
-  headless `file://` smoke (Online, 12 endpoints).
+  always null on Linux (no birth-time API; FFI is blocked); the
+  runtime-version field is `php_version` (not `python_version`); 503
+  `sqlite_unavailable` when pdo_sqlite is missing (suite then skips
+  SQLite).
+- Verified: shared suite 241/241 against it (the SQLite tests skip when
+  pdo_sqlite is absent in the host), plus headless `file://` smoke.
 
 ## 20. Node.js Port (`nodejs/`)
 
-- Same service, same contract: all 12 routes, same URLs/statuses/JSON
+- Same service, same contract: the same 24 routes as every other port,
+  same URLs/statuses/JSON
   shapes (tagged scalars included), same CLI flags, same config
   precedence (CLI > `GNUMARUS_*` > stdin > file > default; file
   search: working dir → `dist/` → project root), same token auth.
@@ -176,22 +203,23 @@
   `os.homedir()`, `/etc/os-release` parsing.
 - Known impl differences (documented, not bugs): `machine` is `x64`
   (node `os.arch`); `release`/`version`/`machine` come from node `os`
-  (same values on Linux); no `python_version` (see `node_version`).
-- Verified: shared suite 126/126 against it, plus headless `file://`
-  smoke (Online, 12 endpoints). During the port the suite caught 2
+  (same values on Linux); the runtime-version field is `node_version`.
+- Verified: shared suite 241/241 against it, plus headless `file://`
+  smoke. During the port the suite caught 2
   real Node bugs (lenient `Buffer.from(x,"base64")`, `f:` tag
   accepted for int fields) and 1 test-harness flake (2 MB stdin via
   pipe+thread → switched to temp-file stdin, deterministic).
 
 ## 21. .NET Port (`dotnet/`)
 
-- Same service, same contract: all 12 routes, same URLs/statuses/JSON
+- Same service, same contract: the same 24 routes as every other port,
+  same URLs/statuses/JSON
   shapes (tagged scalars included), same CLI flags, same config
   precedence (CLI > `GNUMARUS_*` > stdin > file > default; file
   search: working dir → executable dir), same token auth. One NuGet
   dep: Microsoft.Data.Sqlite (HttpListener, JSON, FS, crypto all in
   the shared framework). Build `./dotnet/build.sh`, run
-  `dotnet dotnet/publish/gnumarus.dll`.
+  `dotnet dotnet/publish/GnumarusOSBridge.dll`.
 - Faithful details: exclusive create via `FileMode.CreateNew`,
   `setsid` spawn + libc `kill(-pgid)` via P/Invoke (killpg parity),
   stdin closed at once (DEVNULL parity), real SQLite binding with
@@ -208,17 +236,18 @@
   `bin/`, `obj/` are gitignored build outputs.
 - Known impl differences (documented, not bugs): `machine` is `x64`;
   dangling symlinks are skipped in listings (no lstat equivalent);
-  no `python_version` (see `dotnet_version`).
-- Verified: shared suite 126/126 against it, plus headless `file://`
-  smoke (Online, 12 endpoints).
+  the runtime-version field is `dotnet_version`.
+- Verified: shared suite 241/241 against it, plus headless `file://`
+  smoke.
 - Layout: `tests/helpers.py` (request helpers, isolated workspaces under
   `./tmp/test_workspace`, `GNATIVE_TEST_BASE` env), `tests/run_all.py`
   (runner), `tests/test_help_cors.py`, `tests/test_read_dir.py`,
   `tests/test_read_file.py`, `tests/test_write_file.py`,
   `tests/test_delete.py`.
-- `python3 tests/run_all.py`: picks a free port, spawns `server.py`,
-  waits for readiness, runs `unittest` discovery (158 tests), shuts the
-  server down, exits non-zero on failure.
+- `python3 tests/run_all.py`: picks a free port, spawns the server
+  (the Go reference by default), waits for readiness, runs `unittest`
+  discovery (241 tests), shuts the server down, exits non-zero on
+  failure.
 - Test files also work against a manually started server:
   `python3 python3/server.py --port 1423` + `python3 -m unittest discover -s tests`.
 - Rule: run the full suite after every new feature (regression gate).
@@ -249,7 +278,8 @@
   `sqlite_query`.
 - All server/network errors are rendered in the in-page error banner.
 - Verified headless (Chrome `--dump-dom` over `file://`): online run
-  shows "Online (12 endpoints)" with 26 rows for `/`; offline run shows
+  shows "Online (24 endpoints)" (the route count of `/api/help`) with
+  26 rows for `/`; offline run shows
   the Offline banner with controls disabled.
 
 ## 13. SQLite (`POST /api/sqlite/*`)
@@ -334,8 +364,9 @@
 
 ## 17. Kotlin Port (`kotlin/`)
 
-- Same service, same contract: all 18 routes (`socket_ws` +
-  `socket_starttls`), same URLs/statuses/JSON shapes, same CLI flags
+- Same service, same contract: the same 24 routes as every other port
+  (incl. `socket_ws`, `socket_starttls` and the five OAuth2 routes),
+  same URLs/statuses/JSON shapes, same CLI flags
   (`--host/--port/--token/--auth/--no-auth`), same config precedence
   (CLI > `GNUMARUS_*` > stdin > file > default; file search: working
   dir → jar dir → install root), same token auth (Bearer/`?token=`,
@@ -349,7 +380,7 @@
   request; DDL `rowcount` -1 like CPython), JNA 5.19.1 for Linux
   `statx` ctime (NIO has no change-time), NIO birth time for
   `crtime`. Build `./kotlin/build.sh`, run
-  `kotlin/build/install/gnumarus/bin/gnumarus`. Sources:
+  `kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge`. Sources:
   `kotlin/src/main/kotlin/{Main,Config,Api,Http,SocketWs}.kt`.
 - Own TCP layer on purpose: the JDK `HttpServer` was replaced because
   it exposes no raw socket, so no same-URL WebSocket upgrade was
@@ -359,27 +390,37 @@
   which is why the Kotlin port now serves `socket_ws` like the
   others (see §29).
 - Known impl differences (documented, not bugs): `machine` is
-  `amd64` not `x86_64` (JVM `os.arch`); `python_version` is null
-  (see `jvm_version`/`kotlin_version`); doubles may render in
-  scientific notation (same parsed value).
-- Verified: the shared Python suite passes 214/214 against it with
+  `amd64` not `x86_64` (JVM `os.arch`); the runtime-version field is
+  `jvm_version` (the JRE/JVM the service runs on); doubles may render
+  in scientific notation (same parsed value).
+- Build artifact: `kotlin/build.sh` produces
+  `kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge` (the
+  Gradle root project was renamed); the build script now picks a
+  Gradle 7+ (the system `gradle` may be too old for the Kotlin DSL).
+- Verified: the shared Python suite passes 241/241 against it with
   zero skips (`run_all.py --server-cmd
-  kotlin/build/install/gnumarus/bin/gnumarus --server-cfg
-  kotlin/build/install/gnumarus/config.cfg`), including the full
+  kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge --server-cfg
+  kotlin/build/install/GnumarusOSBridge/config.cfg`), including the full
   WebSocket module, the Host-deny-on-upgrade case and the
   STARTTLS-while-WS-attached refusal; and `filemanager.html` works
-  against it unchanged (headless `file://` smoke: Online, 18
+  against it unchanged (headless `file://` smoke: Online, 24
   endpoints).
 
 ## 15. System Info (`GET /api/sysinfo`)
 
 - No parameters. Returns `{ system, system_name, release, version,
-  machine, processor, hostname, python_version, cpu_count, distro,
-  windows, mac }` using stdlib `platform` only.
+  machine, processor, hostname, cpu_count, distro, windows, mac }`.
 - `system` is the raw name (`Linux`/`Windows`/`Darwin`); `system_name`
   is the friendly one (`Darwin` → `macOS`). `release` is the kernel
   release on Linux (e.g. `7.0.0-38-generic`), the Windows build number
   on Windows, the Darwin release on macOS.
+- Runtime version: the port reports the version of the runtime that
+  executes it, and only that one — `python_version` (Python),
+  `node_version` (Node.js), `php_version` (PHP), `ruby_version` (Ruby),
+  `jvm_version` (Kotlin/JVM) and `dotnet_version` (.NET). The native
+  runtimes (Go, Rust, C++) are compiled ahead of time and report **no**
+  version field at all. The suite enforces "at most one runtime-version
+  field, never a native one".
 - `distro` is parsed from `/etc/os-release` on Linux
   (`{ id, name, version, version_id, pretty_name }`, e.g. Ubuntu
   26.04) and `null` elsewhere. `windows` (`release`, `version`,
@@ -438,7 +479,7 @@
 - Optional inputs: missing key == default; explicit `"null"` ==
   omitted. Strict per-field kinds: `max_*` require `i:`, `timeout`
   takes `i:`/`f:`, `readonly` takes `b:` — anything else is 400.
-- Applies identically to Python/Kotlin/PHP and is enforced by the
+- Applies identically to all nine ports and is enforced by the
   shared suite on every response (`assert_json_scalars` inside the
   request helpers, plus `tv()`/`ti()`/`tf()` for assertions);
   `filemanager.html` parses tags wherever it needs numbers/booleans
@@ -463,8 +504,9 @@
 
 ## 22. Go Port (`go/`)
 
-- Same service, same contract: all 18 shared routes plus the five
-  Gmail OAuth2 routes (`/api/oauth2/*`, see §36; 23 in total), same
+- Same service, same contract: the same **24 routes** as every other
+  port (the 18 shared ones plus the five Gmail OAuth2 routes
+  `/api/oauth2/*`, see §36, plus the index), same
   URLs/statuses/JSON
   shapes (tagged scalars included), same CLI flags, same config
   precedence (CLI > `GNUMARUS_*` > stdin > file > default; file
@@ -478,15 +520,22 @@
   swallow query params into the filename!), DDL `rowcount` -1,
   tilde via `os.UserHomeDir()`, `/etc/os-release` parsing.
 - Known impl differences (documented, not bugs): `machine` is
-  `amd64` (Go `GOARCH`); no `python_version` (see `go_version`).
-- Verified: shared suite 233/233 against it (14 OAuth tests included,
-  plus the WS/TLS ones), headless `file://` smoke (Online, 12
-  endpoints). The suite caught 1 real Go bug (readonly DSN without
-  `file:` prefix silently wrote a file literally named `t.db?mode=ro`).
+  `amd64` (Go `GOARCH`); the port is a **native** runtime, so
+  `/api/sysinfo` reports **no** runtime-version field (the Go toolchain
+  version is not a runtime the service runs on).
+- Build artifact: `go/build.sh` produces `go/GnumarusOSBridge` (the
+  launcher, the test runner and the docs all use that name).
+- Verified: shared suite 241/241 against it (14 OAuth tests included,
+  plus the WS/TLS ones), headless `file://` smoke. The suite caught 2
+  real Go bugs (readonly DSN without
+  `file:` prefix silently wrote a file literally named `t.db?mode=ro`;
+  the `statx` mask asked only for `STATX_BTIME`, so `ctime` came back
+  as `0` on every entry).
 
 ## 23. Rust Port (`rust/`)
 
-- Same service, same contract: all 12 routes, same URLs/statuses/JSON
+- Same service, same contract: the same 24 routes as every other port,
+  same URLs/statuses/JSON
   shapes (tagged scalars included), same CLI flags, same config
   precedence (CLI > `GNUMARUS_*` > stdin > file > default; file
   search: working dir → executable dir), same token auth. Deps:
@@ -512,24 +561,33 @@
   not exist (only alphas) so the dep is `libc 0.2`; `bin/` is a
   gitignored build output (only sources + Cargo.toml/lock committed).
 - Known impl differences (documented, not bugs): `machine` is
-  `x86_64` (matches Python here); no `python_version` (see
-  `rust_version`); dangling symlinks are skipped in listings.
-- Verified: shared suite 126/126 against it, plus headless `file://`
-  smoke (Online, 12 endpoints).
+  `x86_64` (matches Python here); the port is a **native** runtime, so
+  `/api/sysinfo` reports no runtime-version field; dangling symlinks
+  are skipped in listings.
+- Build artifact: `rust/build.sh` produces `rust/bin/GnumarusOSBridge`
+  (the Cargo bin target is renamed; the package keeps the name
+  `GnumarusOSBridge`).
+- Verified: shared suite 241/241 against it, plus headless `file://`
+  smoke.
 
 ## 25. Launcher (`start.sh`)
 
 - `./start.sh --runtime <name> [server args...]` starts any runtime
   (implementation): `python`, `kotlin`, `php`, `ruby`, `nodejs`, `go`,
-  `dotnet`, `rust`. The selector is `--runtime`, not `--port`, so the
-  name never shares a flag with the server's own TCP-port option.
+  `dotnet`, `rust`, `cpp`. The selector is `--runtime`, not `--port`, so
+  the name never shares a flag with the server's own TCP-port option.
+- Every runtime ships a binary named `GnumarusOSBridge`
+  (`go/GnumarusOSBridge`, `rust/bin/GnumarusOSBridge`,
+  `kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge`,
+  `dotnet/publish/GnumarusOSBridge.dll`, `cpp/bin/GnumarusOSBridge`);
+  the launcher looks up exactly those paths.
 - Only the FIRST `--runtime` selects the implementation
   (`--runtime=name` also works); everything else is forwarded
   verbatim — `--port` is reserved exclusively for the server's TCP
   port (e.g. `--port 1423`), alongside `--token`, etc. stdin is never
   touched by the script (`exec` hands the process over, so Ctrl+C,
   pipes and exit codes behave as if the server was started directly).
-- Missing artifact (e.g. unbuilt `go/gnumarus`): prints which file is
+- Missing artifact (e.g. unbuilt `go/GnumarusOSBridge`): prints which file is
   missing plus the exact build command for that runtime, then starts
   the python runtime as fallback (forwarded args kept). Unknown or
   missing `--runtime` prints usage and exits 2 with no fallback.
@@ -546,8 +604,9 @@
   and is forwarded like any other server arg; missing artifact prints
   build instructions + python fallback, unknown name exits 2.
 - `start.bat` (cmd): ASCII-only file, backslash paths, per-port
-  Windows artifacts (`go\gnumarus.exe`, `kotlin\...\gnumarus.bat`,
-  `rust\bin\gnumarus.exe`, `ruby\vendor\gems`), interpreter checks
+  Windows artifacts (`go\GnumarusOSBridge.exe`,
+  `kotlin\...\GnumarusOSBridge.bat`, `rust\bin\GnumarusOSBridge.exe`,
+  `cpp\bin\GnumarusOSBridge.exe`, `ruby\vendor\gems`), interpreter checks
   via `where`,
   goto-based parsing (no delayed expansion, so `!` in args is safe;
   `&|<>()^` in args remain fragile, as in any batch forwarder),
@@ -577,6 +636,9 @@
   under wine (help 0, missing/no-value/unknown 2, fallback 1);
   `start.ps1` under pwsh 7.6.6 (help 0, missing/no-value/unknown 2,
   fallback-hint chain 1).
+- The `cpp` name was added to the three launchers later (the C++ port
+  ships `cpp/bin/GnumarusOSBridge`), with the same
+  missing-artifact/hint/fallback contract as the other ports.
 - The `ruby` name was added to both launchers (and `start.sh`) later:
   interpreter check + `ruby\vendor\gems` artifact check, same
   fallback/hint contract. `start.ps1 --runtime ruby` was then executed
@@ -585,7 +647,8 @@
   by symmetry with the other ports and was not re-run under wine.
 ## 27. C++ Port (`cpp/`)
 
-- Same service, same contract: all 12 routes, same URLs/statuses/JSON
+- Same service, same contract: the same 24 routes as every other port,
+  same URLs/statuses/JSON
   shapes (tagged scalars included), same CLI flags, same config
   precedence (CLI > `GNUMARUS_*` > stdin > file > default; file
   search: working dir → executable dir), same token auth. Vendored in
@@ -593,7 +656,8 @@
   3.54.0 amalgamation (compiled in, zero system deps). Std C++20
   (`<filesystem>`, `<thread>`, lambdas) + POSIX sockets/threads.
   Build `./cpp/build.sh` (cmake `build/` + copy to
-  `cpp/bin/gnumarus`, both gitignored), run `cpp/bin/gnumarus`.
+  `cpp/bin/GnumarusOSBridge`, both gitignored), run
+  `cpp/bin/GnumarusOSBridge`.
 - Faithful details: exclusive create via `O_EXCL`, stdin read capped
   at 1 MB with TTY skip, fork + `setsid` + `kill(-pid)` (killpg
   parity), stdin closed at once, real C-API binding
@@ -607,10 +671,12 @@
   nlohmann `dump()` throws on invalid UTF-8 (shell stdout/stderr now
   sanitized like file text mode).
 - Known impl differences (documented, not bugs): `machine` is
-  `x86_64` (uname, matches Python/Rust); no `python_version` (see
-  `cpp_version`).
-- Verified: shared suite 136/136 against it, plus headless `file://`
-  smoke (Online, 12 endpoints).
+  `x86_64` (uname, matches Python/Rust); the port is a **native**
+  runtime, so `/api/sysinfo` reports no runtime-version field.
+- Build artifact: `cpp/build.sh` produces `cpp/bin/GnumarusOSBridge`
+  (the CMake target was renamed).
+- Verified: shared suite 241/241 against it, plus headless `file://`
+  smoke.
 
 ## 28. Transparent TCP Socket Proxy (`/api/socket/*`)
 
@@ -657,22 +723,13 @@
   .NET (`ConnectAsync` + `CancellationTokenSource`,
   `ReadAsync` cancel maps to `timed_out`); Kotlin
   (`InetSocketAddress` connect timeout, `soTimeout` recv,
-  `SocketTimeoutException` maps to `timed_out`); PHP owns sessions
-  in `php/socketd.php` because `php -S` workers share no memory or
-  fds — a supervisor (unix-socket IPC, spawned + readiness-pinged
-  by `server.php`, `GNUMARUS_SOCKETD` exported to workers) that
-  validates + connects inline and then forks one child per session
-  (fd inherited across fork; child serves blocking ops sequentially
-  on its own session socket and self-reaps on close/idle). Router
-  forwards open to the supervisor and send/recv/close straight to
-  the session child; daemon/session unreachable reads as 503
-  (open) or 404 (unknown/expired id). Requires pcntl/posix,
-  documented; `tests/test_socket.py` skips on 503 (never skips
-  here). `server.php` also gained setsid process-group supervision
-  (`exec setsid` + `kill(-pgid)`) so SIGTERM reaps `php -S`
-  master+workers and supervisor+session children — killing just the
-  master used to orphan workers holding the port (found via a ~240
-  process leak during testing).
+  `SocketTimeoutException` maps to `timed_out`); PHP keeps the
+  sessions in memory inside its single ReactPHP process
+  (`php/src/SocketStore.php`: async connect via `Connector`,
+  data-event buffering, timer long-poll recv, 128-session cap, 300 s
+  idle sweep, sticky EOF, one pending recv, HTTP refused while
+  attached) — the old `php/socketd.php` supervisor/fork-per-session
+  daemon is gone with the `php -S` rewrite (see §31).
 - `filemanager.html`: socket panel (host/port, Open/Close, send
   textarea, Receive with 5 s long-poll, EOF/timeout notes) gated by
   all four capabilities, plus a reusable `SocketSession` JS helper
@@ -683,9 +740,9 @@
   text/binary/raw/256KB/empty, recv timeout, FIN EOF, interleaved
   sessions, close-then-404, refused/missing/bad host/port/timeout,
   unknown id, missing id, bad recv/send params, all 405s, 401s,
-  help names + count). Verified: shared suite 158/158 on all 8
-  ports (Python/Node/Go/Rust/C++/.NET/Kotlin/PHP), headless
-  `file://` smoke (Online, 16 endpoints, socket panel visible).
+  help names + count). Verified: shared suite 241/241 on all 9
+  ports (Python/Node/Go/Rust/C++/.NET/Kotlin/PHP/Ruby), headless
+  `file://` smoke (socket panel visible).
   Bugs caught by the suite: Go double-`readBody` (body consumed
   twice, always 400); Node `f:` port accepted (now `i:`-only);
   PHP `fread` returning `false` (not `""`) on receive timeout
@@ -749,9 +806,9 @@
   close-once + 2 s grace force-close — the JDK `HttpServer` was
   dropped precisely because it exposes no raw socket for the
   same-URL upgrade).
-  Every port now advertises `socket_ws` (help 18 routes; 23 on the Go
-  reference once the Gmail OAuth2 routes, §36, are counted), so the
-  suite's `socket_ws` capability probe no longer skips anywhere.
+  Every port now advertises `socket_ws` (help 24 routes on every
+  port, the Gmail OAuth2 routes included, §36), so the suite's
+  `socket_ws` capability probe no longer skips anywhere.
 - `filemanager.html`: `SocketSession.openWs(host, port, hooks)`
   (open-then-attach, token from the stored header, native
   `WebSocket`, `onMessage({bytes, text})` / `onClose`) with
@@ -760,18 +817,19 @@
   capability, falls back to HTTP polling), push-append log and a
   disabled Receive button in WS mode.
 - Tests: `tests/test_socket_ws.py` (stdlib raw client: masked
-  frames, fragmentation, reassembly; 16 client tests: echo
+  frames, fragmentation, reassembly; 17 client tests: echo
   binary/text/fragmented/256KB, ping/pong, EOF->close 1000,
   close-ends-session (404 after echo, deterministic via
   delete-before-echo), HTTP-refused-while-attached x2,
   HTTP-close-kills-WS, unmasked->1002, unknown id 404, missing id
   400, no token 401, plain GET 400, POST 405, help names+count).
-  `test_help_cors` accepts the optional 17th name; `recv_all`
+  `test_help_cors` now asserts the exact 24-name catalog on every
+  port; `recv_all`
   fails fast after 3 consecutive empty timeouts instead of hanging.
   Verified: the full suite runs the whole WS module on every port
-  (214/214 with zero skips on Go and on Kotlin, and green on
+  (241/241 with zero skips on Go and on Kotlin, and green on
   python/nodejs/rust/cpp/dotnet/php/ruby). Headless `file://` smoke:
-  Online (18 endpoints), socket panel + WS checkbox visible.
+  socket panel + WS checkbox visible.
   Live-browser WS
   could NOT be verified here: both headless Chromes in this
   container fail even a trivial echo WS (environmental: real-time
@@ -840,7 +898,7 @@
   side effects, OPTIONS deny, WS-upgrade deny, bind accept/reject
   via real sub-servers) + `test_config.py` bind cases. Verified:
   green on every port; the WS-upgrade deny now runs everywhere too
-  (214/214 with zero skips on Go and Kotlin).
+  (241/241 with zero skips on Go and Kotlin).
 
 ## 31. PHP on ReactPHP (no more php -S)
 - The PHP port no longer uses `php -S` workers: `php/server.php`
@@ -848,7 +906,7 @@
   a manual HTTP/1.1 server (`php/src/HttpServer.php` on
   `react/socket`, one request per connection, `Connection: close`;
   heads capped at 1 MB, bodies at 128 MB, chunked bodies
-  de-chunked). Same 17 routes as the WS ports — PHP gains
+  de-chunked). Same 24 routes as every other port — PHP gains
   `socket_ws` (hand-rolled RFC 6455 in `php/src/WsProto.php`:
   incremental decoder, fragmentation, 4 MB cap, ping/pong,
   delete-before-echo, 2 s grace on peer EOF, 1011 on dead TCP).
@@ -878,9 +936,10 @@
   before FIN); the session store must not close the bridge-owned
   WS connection (delete-before-echo); `SocketServer` needs literal
   IPs; recv param validation runs before session lookup (Go order).
-- Verified: 186/186 (+1 crtime skip) x3 stable runs vs PHP
+- Verified: 241/241 (the SQLite tests skip when pdo_sqlite is absent
+  in the host) x3 stable runs vs PHP
   (the blob flake seen once is the known pre-existing one,
-  green on re-run); `start.sh --runtime php` smoke-tested (17
+  green on re-run); `start.sh --runtime php` smoke-tested (24
   routes, `socket_ws` advertised).
 
 ## 32. Showcase Filemanager (`showcase/filemanager/`)
@@ -896,7 +955,7 @@
   localStorage; default target http://127.0.0.1:1423
   (`./start.sh --runtime go`).
 - Verified: tests/test_showcase_filemanager.py (static purity +
-  node --check + end-to-end app flow vs Go) — 192/192 with the
+  node --check + end-to-end app flow vs Go) — 241/241 with the
   backend suite; headless Chromium smoke Online (27 root entries
   rendered, zero JS errors).
 
@@ -964,7 +1023,7 @@
   SORT-fallback/SEARCH/literal FETCH/LOGOUT, plus AUTHENTICATE
   XOAUTH2 success and the rejection-continuation abort, plus a
   Gmail-shaped session with no SORT and an unsolicited CAPABILITY
-  after AUTHENTICATE) — 233/233 with the backend suite;
+  after AUTHENTICATE) — 241/241 with the backend suite;
   headless smoke (6 providers, Proton note, zero JS errors); a second
   headless pass drives the real `change` listener to prove the
   Auth->Provider alignment and re-runs the end-to-end page load
@@ -1017,8 +1076,9 @@
   verification happens in the proxy service.
 
 ## 35. Ruby Port (`ruby/`)
-- Scope: a full-parity Ruby implementation of the service (all 18
-  routes, incl. `socket_ws` and `socket_starttls`), same CLI flags,
+- Scope: a full-parity Ruby implementation of the service (the same 24
+  routes as every other port, incl. `socket_ws`, `socket_starttls` and
+  the five OAuth2 routes), same CLI flags,
   same config precedence, byte-identical help catalog and 400 texts.
   Ruby 3.3 stdlib only (`socket`, `openssl`, `json`, `fiddle`,
   `securerandom`, `base64`, `etc`); the single gem (`sqlite3`) is
@@ -1026,7 +1086,7 @@
   like `php/vendor/`, `node_modules/`, `vendor/`).
 - Layout: `ruby/server.rb` (CLI + config + accept loop) and
   `ruby/lib/gnumarus/{tags,util,http,routes,fsops,shell,sysinfo,
-  sqlite,sock,sock_ws,api,config,statx}.rb`. `Gem.paths` is pointed at
+  sqlite,sock,sock_ws,oauth2,api,config,statx}.rb`. `Gem.paths` is pointed at
   `ruby/vendor/gems` at boot (default gems stay resolvable), so a
   missing driver degrades to the usual 503 instead of breaking boot.
 - HTTP: hand-rolled HTTP/1.1 over `TCPServer#accept` (one request per
@@ -1118,7 +1178,7 @@
      between reads; that is what turns an HTTP close into the 1011 WS
      close frame.
 - Verified: `python3 tests/run_all.py --server-cmd "ruby ruby/server.rb"
-  --server-cfg ruby/config.cfg` → 214 tests OK, 0 skipped (all 12 TLS
+  --server-cfg ruby/config.cfg` → 241 tests OK, 0 skipped (all 12 TLS
   tests exercised), three consecutive runs green; sqlite probe reports
   "yes"; the 503 fallback was verified by moving `ruby/vendor/gems`
   aside. `./start.sh --runtime ruby` launches it (falls back with build
@@ -1182,6 +1242,7 @@
 - Tests: `tests/test_oauth2.py` (capability-gated) runs the whole flow
   against a local fake Google that verifies the PKCE S256 verifier,
   the code and the redirect URI, plus the validation/error/404/405/
-  idempotency/refresh paths; `tests/test_help_cors.py` treats the five
-  names as optional so non-Go ports still pass. Verified: 233 tests OK
+  idempotency/refresh paths. The five routes are part of the standard
+  24-route catalog on every port, so `tests/test_help_cors.py` asserts
+  them exactly (they are no longer optional). Verified: 241 tests OK
   vs every port (14 OAuth tests exercised on each).

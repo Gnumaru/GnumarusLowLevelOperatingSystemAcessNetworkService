@@ -19,7 +19,7 @@ pub const VERSION: &str = "0.10.0";
 
 fn usage() {
     eprintln!(
-        "Usage: ./bin/gnumarus [--host HOST] [--port PORT] [--token TOKEN] [--no-auth | --auth]\n\
+        "Usage: ./bin/GnumarusOSBridge [--host HOST] [--port PORT] [--token TOKEN] [--no-auth | --auth]\n\
          \nEvery setting can also come from a GNUMARUS_* environment variable\n\
          (GNUMARUS_HOST/PORT/TOKEN/NO_AUTH), from stdin key=value lines, or from\n\
          config.cfg (working dir or executable dir).\n\

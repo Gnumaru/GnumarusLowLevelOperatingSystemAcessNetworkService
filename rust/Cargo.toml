@@ -3,6 +3,12 @@ name = "gnumarus"
 version = "0.10.0"
 edition = "2021"
 
+# The build artifact is named GnumarusOSBridge (same name as the Go
+# reference port); the package name stays "gnumarus".
+[[bin]]
+name = "GnumarusOSBridge"
+path = "src/main.rs"
+
 [dependencies]
 libc = "0.2"
 openssl = "0.10"

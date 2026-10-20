@@ -33,6 +33,7 @@ func bindAllowed(host string) bool {
 	}
 	return quadLoopback(h)
 }
+
 const configMaxBytes = 1024 * 1024
 const configEnvPrefix = "GNUMARUS_"
 

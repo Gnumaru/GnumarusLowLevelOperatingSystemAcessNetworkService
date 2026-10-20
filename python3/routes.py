@@ -273,6 +273,18 @@ ROUTES = [
                 "description": "Absolute or relative path of the empty "
                                "directory to delete. ~/ expands to the "
                                "server user's home directory.",
+            },
+            {
+                "name": "shallow",
+                "location": "query",
+                "required": "b:false",
+                "type": "string",
+                "default": "0",
+                "allowed": ["0", "1"],
+                "description": "If '1', delete a shallow directory instead "
+                               "(same as DELETE /api/dir/shallow): files, "
+                               "symlinks and empty subdirectories only, "
+                               "never recursive.",
             }
         ],
         "response": "200 JSON { path, absolute_path, deleted: true }.",
@@ -286,7 +298,10 @@ ROUTES = [
         "description": "Delete a shallow directory: a directory containing "
                        "only files (including symlinks) and empty "
                        "subdirectories. Fails when it contains a non-empty "
-                       "real subdirectory. Does not delete recursively.",
+                       "real subdirectory. Does not delete recursively. "
+                       "Also reachable as DELETE /api/dir?shallow=1 and "
+                       "under the path aliases /api/shallow_dir and "
+                       "/api/dir_shallow.",
         "params": [
             {
                 "name": "path",
@@ -486,7 +501,11 @@ ROUTES = [
                     "platform name (Linux/Windows/Darwin); system_name is "
                     "the friendly one (Darwin -> macOS). distro is parsed "
                     "from /etc/os-release on Linux and null elsewhere; "
-                    "windows/mac objects appear only on those systems.",
+                    "windows/mac objects appear only on those systems. "
+                    "Managed runtimes add their own runtime-version field "
+                    "(python_version, node_version, php_version, "
+                    "ruby_version, jvm_version, dotnet_version); native "
+                    "runtimes (Go, Rust, C++) report no version field.",
         "errors": "401 missing/invalid token, 405 wrong method.",
     },
     {

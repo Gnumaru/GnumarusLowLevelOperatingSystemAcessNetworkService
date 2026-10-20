@@ -114,7 +114,10 @@ HttpResponse handle_sysinfo() {
     o["machine"] = machine;
     o["processor"] = "";
     o["hostname"] = hostname;
-    o["cpp_version"] = __VERSION__;
+    // NOTE: no runtime-version field here. Managed runtimes report the
+    // version of the runtime that executes them (python_version,
+    // node_version, php_version, ruby_version, jvm_version,
+    // dotnet_version); native ones (Go, Rust, C++) do not report one.
     o["cpu_count"] = jenc_int(cpu);
     o["distro"] = distro;
     o["windows"] = windows;

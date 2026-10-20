@@ -103,12 +103,15 @@ json all_routes() {
         "DELETE", "/api/dir?path=<path>", "delete_directory",
         "Delete an empty directory (rmdir equivalent). Fails when the directory is not empty.",
         json::array({param("path", "query", true, "string",
-                           "Absolute or relative path of the empty directory to delete. ~/ expands to the server user's home directory.")}),
+                           "Absolute or relative path of the empty directory to delete. ~/ expands to the server user's home directory."),
+                     param("shallow", "query", false, "string",
+                           "If '1', delete a shallow directory instead (same as DELETE /api/dir/shallow): files, symlinks and empty subdirectories only, never recursive.",
+                           "0", true, {"0", "1"})}),
         "200 JSON { path, absolute_path, deleted: true }.",
         "400 missing path / not-a-directory / not-empty, 404 not found, 403 forbidden."));
     routes.push_back(route(
         "DELETE", "/api/dir/shallow?path=<path>", "delete_directory_shallow",
-        "Delete a shallow directory: a directory containing only files (including symlinks) and empty subdirectories. Fails when it contains a non-empty real subdirectory. Does not delete recursively.",
+        "Delete a shallow directory: a directory containing only files (including symlinks) and empty subdirectories. Fails when it contains a non-empty real subdirectory. Does not delete recursively. Also reachable as DELETE /api/dir?shallow=1 and under the path aliases /api/shallow_dir and /api/dir_shallow.",
         json::array({param("path", "query", true, "string",
                            "Absolute or relative path of the shallow directory to delete. ~/ expands to the server user's home directory.")}),
         "200 JSON { path, absolute_path, deleted: true }.",
@@ -166,7 +169,7 @@ json all_routes() {
         "GET", "/api/sysinfo", "system_info",
         "Return operating-system information about the host running the server. Takes no parameters.",
         json::array(),
-        "200 JSON { system, system_name, release, version, machine, processor, hostname, cpu_count, distro, windows, mac }. system is the raw platform name (Linux/Windows/Darwin); system_name is the friendly one (Darwin -> macOS). distro is parsed from /etc/os-release on Linux and null elsewhere; windows/mac objects appear only on those systems.",
+        "200 JSON { system, system_name, release, version, machine, processor, hostname, cpu_count, distro, windows, mac }. system is the raw platform name (Linux/Windows/Darwin); system_name is the friendly one (Darwin -> macOS). distro is parsed from /etc/os-release on Linux and null elsewhere; windows/mac objects appear only on those systems. Managed runtimes add their own runtime-version field (python_version, node_version, php_version, ruby_version, jvm_version, dotnet_version); native runtimes (Go, Rust, C++) report no version field.",
         "401 missing/invalid token, 405 wrong method."));
     routes.push_back(route(
         "POST", "/api/socket/open", "socket_open",

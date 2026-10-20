@@ -47,13 +47,15 @@ Key design points:
 - Open CORS on every response, including errors, plus `OPTIONS` preflight
   with `204`. `Access-Control-Allow-Origin: *`.
 - Token authentication is required on every route except `GET /`,
-  `GET /api/help`, and (where implemented) the OAuth2 loopback callback.
-  The token is minted at startup and printed, or fixed with `--token`.
-  `--no-auth` disables it explicitly, with a loud warning.
+  `GET /api/help`, and the OAuth2 loopback callback (implemented on
+  every port). The token is minted at startup and printed, or fixed
+  with `--token`. `--no-auth` disables it explicitly, with a loud
+  warning.
 - `GET /api/help` is the single source of truth for the route catalog:
-  URL, name, description, parameters, and (for the Go reference) the
-  OAuth2 routes. Clients are expected to drive themselves from it.
-- Stdlib only for the reference Python port; the other ports add only the
+  URL, name, description, parameters, and the OAuth2 routes. Every port
+  advertises the same 24 routes. Clients are expected to drive
+  themselves from it.
+- Stdlib only in the Python port; the other ports add only the
   dependencies listed below.
 
 ## Features
@@ -72,6 +74,10 @@ Filesystem:
 - `DELETE /api/file?path=...` deletes a file. `400` if the path is a
   directory.
 - `DELETE /api/dir?path=...` removes an empty directory only.
+- `DELETE /api/dir/shallow?path=...` removes a *shallow* directory
+  (files, symlinks and empty subdirectories only, never recursive).
+  Also reachable as `DELETE /api/dir?path=...&shallow=1` and under the
+  path aliases `/api/shallow_dir` and `/api/dir_shallow`.
 
 Shell:
 
@@ -108,7 +114,10 @@ System information:
 
 - `GET /api/sysinfo` returns OS and host information: `{system,
   system_name, release, version, machine, processor, hostname,
-  python_version, cpu_count, distro?, windows?, mac?}`.
+  cpu_count, distro?, windows?, mac?}`. Managed runtimes also report
+  the version of the runtime that executes them (`python_version`,
+  `node_version`, `php_version`, `ruby_version`, `jvm_version`,
+  `dotnet_version`); the native runtimes (Go, Rust, C++) report none.
 
 Gmail OAuth2 (all ports):
 
@@ -125,17 +134,35 @@ Service index:
 
 ## Implementations
 
+Every port builds a binary named `GnumarusOSBridge` (the Kotlin port
+installs it as `build/install/GnumarusOSBridge/bin/GnumarusOSBridge`, the
+.NET port as `publish/GnumarusOSBridge.dll`).
+
 | Runtime | Directory | Build | Run |
 |---|---|---|---|
-| Go (reference) | `go/` | `./go/build.sh` | `go/gnumarus` |
-| Rust | `rust/` | `./rust/build.sh` | `rust/bin/gnumarus` |
+| Go (reference) | `go/` | `./go/build.sh` | `go/GnumarusOSBridge` |
+| Rust | `rust/` | `./rust/build.sh` | `rust/bin/GnumarusOSBridge` |
 | Python 3 | `python3/` | none | `python3 python3/server.py` |
 | Node.js / TypeScript | `nodejs/` | `./nodejs/build.sh` | `node nodejs/dist/server.js` |
 | PHP | `php/` | `./php/build.sh` | `php php/server.php` |
 | Ruby | `ruby/` | `./ruby/build.sh` | `ruby ruby/server.rb` |
-| Kotlin / JVM | `kotlin/` | `./kotlin/build.sh` | `kotlin/build/install/gnumarus/bin/gnumarus` |
-| C# / .NET | `dotnet/` | `./dotnet/build.sh` | `dotnet dotnet/publish/gnumarus.dll` |
-| C++ | `cpp/` | `./cpp/build.sh` | `cpp/bin/gnumarus` |
+| Kotlin / JVM | `kotlin/` | `./kotlin/build.sh` | `kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge` |
+| C# / .NET | `dotnet/` | `./dotnet/build.sh` | `dotnet dotnet/publish/GnumarusOSBridge.dll` |
+| C++ | `cpp/` | `./cpp/build.sh` | `cpp/bin/GnumarusOSBridge` |
+
+Dependencies beyond the language runtime:
+
+| Runtime | Dependencies |
+|---|---|
+| Go | `modernc.org/sqlite` (pure Go, no cgo) |
+| Rust | `serde_json`, `sqlparser`, `rusqlite` (bundled), `libc`, `openssl` |
+| Python 3 | none (stdlib only) |
+| Node.js / TypeScript | `typescript` + `@types/node` (build-time only) |
+| PHP | `react/socket`, `react/event-loop`, `react/child-process` |
+| Ruby | `sqlite3` gem (vendored under `ruby/vendor/gems`) |
+| Kotlin / JVM | Gson, `sqlite-jdbc`, JNA |
+| C# / .NET | `Microsoft.Data.Sqlite` |
+| C++ | vendored `nlohmann/json` + SQLite amalgamation (system OpenSSL) |
 
 All ports share the same 24 routes, including the 5 Gmail
 OAuth2 routes. A unified launcher is provided:
@@ -145,8 +172,8 @@ OAuth2 routes. A unified launcher is provided:
 ```
 
 `name` is one of `python`, `kotlin`, `php`, `ruby`, `nodejs`, `go`,
-`dotnet`, `rust`. `start.bat` and `start.ps1` provide the same contract
-on Windows.
+`dotnet`, `rust`, `cpp`. `start.bat` and `start.ps1` provide the same
+contract on Windows.
 
 ## Quick start
 
@@ -154,7 +181,7 @@ Build and run the Go reference:
 
 ```
 ./go/build.sh
-./go/gnumarus --port 1423
+./go/GnumarusOSBridge --port 1423
 ```
 
 Or use the launcher:
@@ -163,15 +190,17 @@ Or use the launcher:
 ./start.sh --runtime go --port 1423
 ```
 
-The server prints a line like:
+The server prints the resolved configuration and the token:
 
 ```
-config sources: host=... port=... token=... no_auth=...
-<token>
+config sources: host=default port=cli token=default no_auth=default
+GnumarusNativeOps v0.10.0 serving on http://127.0.0.1:1423 (Ctrl+C to stop)
+API token: <token>
 ```
 
-The printed token is required for every request except `GET /` and
-`GET /api/help`. Keep the server running and call the API, for example:
+The printed token is required for every request except `GET /`,
+`GET /api/help` and the OAuth2 loopback callback. Keep the server
+running and call the API, for example:
 
 ```
 curl http://127.0.0.1:1423/api/help
@@ -182,7 +211,7 @@ curl -H "Authorization: Bearer <token>" "http://127.0.0.1:1423/api/dir?path=."
 
 All routes return JSON unless noted. Errors are JSON objects of the form
 `{error, message, path?}` with the appropriate HTTP status
-(400/403/404/405/409).
+(400/401/403/404/405/409).
 
 | Method | URL | Name |
 |---|---|---|
@@ -212,7 +241,8 @@ All routes return JSON unless noted. Errors are JSON objects of the form
 | POST | `/api/oauth2/close?id=...` | oauth2_close (all ports) |
 
 Use `GET /api/help` for the full machine-readable catalog, including
-parameter types and descriptions.
+parameter types and descriptions. Every port advertises the same 24
+routes, in the same order, with the same parameters.
 
 ## Wire format
 
@@ -400,8 +430,8 @@ stdlib. It runs against any port:
 python3 tests/run_all.py
 ```
 
-The runner mints a token, starts the Go reference server, runs all tests,
-and stops it. To test another port:
+The runner mints a token, starts the Go reference server, runs all
+tests (241 of them), and stops it. To test another port:
 
 ```
 python3 tests/run_all.py --server-cmd "python3 python3/server.py" \
@@ -411,7 +441,8 @@ python3 tests/run_all.py --server-cmd "python3 python3/server.py" \
 `--server-cfg` is required together with `--server-cmd`. SQLite tests
 self-skip when the server reports no support. The suite enforces the wire
 invariant (no JSON number/boolean/null anywhere after parsing) on every
-response.
+response, checks the exact 24-route catalog on every port, and compares
+`ctime` against `stat(1)`.
 
 ## Showcases
 

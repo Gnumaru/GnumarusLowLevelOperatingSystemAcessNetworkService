@@ -7,10 +7,11 @@ Every test module imports from here::
 The target server is read from GNATIVE_TEST_BASE
 (default http://127.0.0.1:1423). The API token is read from
 GNATIVE_TEST_TOKEN and attached automatically (pass auth=False to
-opt out). tests/run_all.py starts a server automatically (go/gnumarus
-by default); the modules also work against a manually started server::
+opt out). tests/run_all.py starts a server automatically
+(go/GnumarusOSBridge by default); the modules also work against a
+manually started server::
 
-    ./go/gnumarus --token secret --port 1423
+    ./go/GnumarusOSBridge --token secret --port 1423
     GNATIVE_TEST_TOKEN=secret python3 -m unittest discover -s tests
 """
 

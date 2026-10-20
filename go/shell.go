@@ -203,10 +203,10 @@ func handleExecShell(w http.ResponseWriter, r *http.Request, opts Opts) {
 	}
 	sendJSON(w, 200, map[string]any{
 		"command": command, "cwd": cwd,
-		"returncode": mustEnc(int64(returncode)),
-		"stdout":         outAcc.buf.String(),
-		"stderr":         errAcc.buf.String(),
-		"timed_out":      mustEnc(timedOut),
+		"returncode":       mustEnc(int64(returncode)),
+		"stdout":           outAcc.buf.String(),
+		"stderr":           errAcc.buf.String(),
+		"timed_out":        mustEnc(timedOut),
 		"stdout_truncated": mustEnc(outAcc.truncated),
 		"stderr_truncated": mustEnc(errAcc.truncated),
 		"max_stdout":       mustEnc(int64(maxOut)),

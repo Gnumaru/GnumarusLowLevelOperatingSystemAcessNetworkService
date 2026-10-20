@@ -7,13 +7,13 @@ runs unittest discovery over tests/test_*.py, then stops the server.
 Usage:
     python3 tests/run_all.py [--server-cmd CMD] [--server-cmd-args ...]
 
-Default server is go/gnumarus (the reference port). To run the suite
-against another implementation with the same CLI/HTTP contract
+Default server is go/GnumarusOSBridge (the reference port). To run the
+suite against another implementation with the same CLI/HTTP contract
 (e.g. the Kotlin port):
 
     python3 tests/run_all.py \\
-        --server-cmd kotlin/build/install/gnumarus/bin/gnumarus \\
-        --server-cfg kotlin/build/install/gnumarus/config.cfg
+        --server-cmd kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge \\
+        --server-cfg kotlin/build/install/GnumarusOSBridge/config.cfg
 """
 
 import argparse
@@ -97,8 +97,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Run the regression suite.")
     ap.add_argument("--server-cmd", default=None,
                     help="Server launch command, e.g. "
-                         "'kotlin/build/install/gnumarus/bin/gnumarus'. "
-                         "Defaults to go/gnumarus (the reference port).")
+                         "'kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge'. "
+                         "Defaults to go/GnumarusOSBridge (the reference port).")
     ap.add_argument("--server-cfg", default=None,
                     help="config.cfg path used by the server under test. "
                          "Required with --server-cmd.")
@@ -114,9 +114,9 @@ def main(argv=None):
         os.environ["GNATIVE_TEST_SERVER_CMD"] = opts.server_cmd
         os.environ["GNATIVE_TEST_CFG"] = (
             opts.server_cfg or os.path.join(
-                "kotlin", "build", "install", "gnumarus", "config.cfg"))
+                "kotlin", "build", "install", "GnumarusOSBridge", "config.cfg"))
     else:
-        gobin = os.path.join(ROOT, "go", "gnumarus")
+        gobin = os.path.join(ROOT, "go", "GnumarusOSBridge")
         if not (os.path.isfile(gobin) and os.access(gobin, os.X_OK)):
             ap.error("default server %s is missing: run ./go/build.sh "
                      "first (or pass --server-cmd/--server-cfg for "

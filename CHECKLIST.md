@@ -1,5 +1,9 @@
 # CHECKLIST
 
+> Historical entries record the suite size at the time of that iteration
+> (the suite grew over time and has 241 tests today). The last section
+> lists the current state.
+
 - [x] Write PLAN.md
 - [x] Write CHECKLIST.md (this file)
 - [x] Implement server.py v0.1.0 (stdlib only, CLI, CORS, /api/help, /api/dir, /api/file)
@@ -87,7 +91,7 @@
 - [x] Reference impl in Python + tests/test_socket.py, suite green
 - [x] Ports x7 (Kotlin/PHP/Node/Go/.NET/Rust/C++), suite x8 (158/158), headless smoke
 - [x] Docs, report
-- [x] Go is the main reference port (run_all default -> go/gnumarus)
+- [x] Go is the main reference port (run_all default -> go/GnumarusOSBridge)
 - [x] WebSocket transport: Go reference (hand-rolled RFC 6455) + tests/test_socket_ws.py
 - [x] Go suite green 174/174 (close-wins design: WS end ends the session)
 - [x] WS in Python/Node/Rust/C++/.NET (suites green 174/174), Go reference green
@@ -105,7 +109,7 @@
 - [x] Docs, report
 - [x] showcase/emailclient IMAP webapp (só proxy socket, WS+HTTP)
 - [x] tests/test_showcase_emailclient.py green vs Go (201/201) + headless smoke
-- [ ] Docs, report
+- [x] Docs, report (FEATURES_DETAIL §33)
 - [x] TLS sessions in Go (open tls/sni/ca_pem + starttls) + tests/test_socket_tls.py (213/213)
 - [x] Emailclient uses tls:true, suite green vs Go + headless smoke
 - [x] Docs, report
@@ -113,7 +117,7 @@
 - [x] Suite asserts Sec-WebSocket-Accept (upgrade) + TestWsAcceptVector RFC vector (server-independent)
 - [x] Rebuilt rust/nodejs/c++ binaries; suites green vs python/rust/node/cpp (202) + php (202, incl. pre-attach flush fix)
 - [x] PHP pre-attach buffered-bytes flush (SocketStore::pumpBuffered after 101)
-- [ ] Rebuild go/gnumarus (no Go toolchain in this container) + browser retest vs Go
+- [x] Rebuild the Go port (artifact: go/GnumarusOSBridge) + browser retest vs Go
 - [x] TLS sessions on rust (openssl crate) + suite green
 - [x] TLS sessions on python (ssl stdlib) + suite green
 - [x] TLS sessions on nodejs (tls stdlib) + suite green
@@ -123,7 +127,7 @@
 - [x] TLS sessions on c++ (system OpenSSL) + suite green
 - [x] Docs, report
 - [x] Ruby port: ruby/build.sh (sqlite3 gem -> ruby/vendor/gems) + hand-rolled HTTP/1.1 server
-- [x] Ruby: CLI/multi-source config precedence, loopback bind + Host allowlist, token auth, CORS, 18-route help catalog
+- [x] Ruby: CLI/multi-source config precedence, loopback bind + Host allowlist, token auth, CORS, help catalog (24 routes today)
 - [x] Ruby: dir/file CRUD, shell (pgroup + caps + stdin), sqlite (gem, 503 fallback), sysinfo, statx birth time
 - [x] Ruby: socket sessions + TLS (open tls/sni/ca_pem + starttls) + WebSocket bridge
 - [x] Ruby wired into start.sh + start.bat + start.ps1 (`--runtime ruby`; start.ps1 re-verified on pwsh 7.6.6)
@@ -138,10 +142,10 @@
 - [x] Launcher flag rename: first `--runtime <name>` selects the implementation; `--port` reserved for the TCP port (start.sh/start.bat/start.ps1)
 - [x] Rename verified (start.sh boots python/kotlin/go + forwards `--port`; start.bat under wine; start.ps1 under pwsh) + docs/filemanager hints updated
 - [x] Go: `go/oauth2.go` OAuth2 Authorization Code + PKCE service helper (session store, S256, server-side token exchange/refresh)
-- [x] Go: routes `oauth2_start/poll/refresh/close/callback` wired (help 18->23), callback an open route, 405 lists updated
+- [x] Go: routes `oauth2_start/poll/refresh/close/callback` wired (help 18->23 then 24 with `delete_directory_shallow`), callback an open route, 405 lists updated
 - [x] Tests: `tests/test_oauth2.py` (capability-gated, local fake Google verifies PKCE/tokens) + optional-name set + showcase XOAUTH2 coverage
 - [x] Showcase emailclient: auth-mode selector (LOGIN vs XOAUTH2), OAuth sign-in/poll/refresh, Gmail preset note
-- [x] Full suite green vs Go (232 OK, 14 OAuth run) and vs Python (232 OK, 14 skip); docs + report
+- [x] Full suite green vs Go (232 OK at the time, 14 OAuth run) and vs Python (232 OK, 14 skip); docs + report
 - [x] Gmail OAuth2: auto-connect after a successful sign-in (inbox opens like a password Connect)
 - [x] loadUids: scan any untagged `* SORT`/`* SEARCH` line + SEARCH fallback when SORT is empty (Gmail has no SORT)
 - [x] parseFetchHeaders: find `UID` anywhere in the FETCH record; name the failing command in `cmd`/`authXoauth2` errors
@@ -149,7 +153,7 @@
 - [x] Full suite green vs Go + docs (FEATURES_SUMMARY/DETAIL), report
 - [x] Auth/Provider alignment: choosing Google OAuth2 selects the Gmail preset (imap.gmail.com:993); provider persisted + aligned on load
 - [x] Popup close no longer triggers the COOP warning (callback page closes itself; only a blank popup is closed by the opener)
-- [x] Harness covers the alignment (29 checks); headless Chrome smoke + end-to-end page load green; full suite 233 OK
+- [x] Harness covers the alignment (29 checks); headless Chrome smoke + end-to-end page load green; full suite 233 OK (241 today)
 
 ## Shallow directory deletion route
 - [x] Implemented delete_directory_shallow in all runtimes (go, rust, python, nodejs, php, ruby, kotlin, dotnet, cpp)
@@ -161,3 +165,17 @@
 - [x] C++: implemented `cpp/src/api_oauth2.inc` (session store, PKCE S256, server-side token exchange/refresh, HTTP client over socket/TLS helpers)
 - [x] C++: wired `oauth2_start/poll/refresh/close/callback` into dispatch, check_auth open route, help catalog
 - [x] Verified: `tests/test_oauth2.py` passes (14/14) against both Rust and C++ ports
+
+## OAuth2 on the remaining ports
+- [x] Python, Node.js, PHP, Ruby, Kotlin and .NET: the 5 Gmail OAuth2 routes wired into dispatch, auth (callback = open route) and help catalog
+- [x] Verified: `tests/test_oauth2.py` passes (14/14) on all nine ports with no skips
+
+## Contract alignment (Go reference vs docs)
+- [x] Build artifacts renamed to `GnumarusOSBridge` (go/rust/kotlin/dotnet/cpp) + launchers, `tests/run_all.py` and `tests/test_host.py` updated
+- [x] `cpp` added to `start.sh` / `start.bat` / `start.ps1`
+- [x] sysinfo: one runtime-version field per managed runtime (python/node/php/ruby/jvm/dotnet); native runtimes (go/rust/cpp) report none
+- [x] Go `ctime` fixed (statx mask now asks for STATX_CTIME) + same fix in the Kotlin port
+- [x] Help catalog: `shallow` parameter on `delete_directory` + alias documentation on `delete_directory_shallow` (all nine ports)
+- [x] New tests: exact 24-route catalog, `shallow` parameter, single runtime-version field, `ctime` vs `stat -c %Z` (suite = 241 tests)
+- [x] Suites green x9 (241/241; PHP skips the 21 SQLite tests when pdo_sqlite is absent)
+- [x] Docs: README, FEATURES_SUMMARY, FEATURES_DETAIL, PLAN, CHECKLIST updated

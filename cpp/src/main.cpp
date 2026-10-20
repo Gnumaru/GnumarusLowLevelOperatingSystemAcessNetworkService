@@ -1,7 +1,7 @@
 // Entry point: CLI, config resolution, server boot.
 //
 // Usage:
-//     ./bin/gnumarus [--host H] [--port P] [--token TEXT] [--no-auth | --auth]
+//     ./bin/GnumarusOSBridge [--host H] [--port P] [--token TEXT] [--no-auth | --auth]
 //
 // Settings resolve as: CLI flag > GNUMARUS_* env var > stdin key=value
 // lines > cpp/config.cfg (also checked next to the working dir and the
@@ -19,7 +19,7 @@ namespace {
 
 void usage() {
     std::cerr
-        << "Usage: ./bin/gnumarus [--host HOST] [--port PORT] [--token TOKEN] [--no-auth | --auth]\n"
+        << "Usage: ./bin/GnumarusOSBridge [--host HOST] [--port PORT] [--token TOKEN] [--no-auth | --auth]\n"
         << "\nEvery setting can also come from a GNUMARUS_* environment variable\n"
         << "(GNUMARUS_HOST/PORT/TOKEN/NO_AUTH), from stdin key=value lines, or from\n"
         << "config.cfg (working dir or executable dir).\n"

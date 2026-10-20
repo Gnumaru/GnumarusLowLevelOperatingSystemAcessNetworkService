@@ -13,8 +13,9 @@ publish/
 node_modules/
 vendor/
 nodejs/dist/
-/go/gnumarus
-obj/
-bin/
-publish/
+# build artifacts (every port ships a binary named GnumarusOSBridge)
 go/GnumarusOSBridge
+rust/bin/GnumarusOSBridge
+kotlin/build/
+dotnet/publish/GnumarusOSBridge.dll
+cpp/bin/GnumarusOSBridge

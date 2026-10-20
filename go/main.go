@@ -10,7 +10,7 @@ import (
 // Gnumarus native-operations HTTP service (Go port).
 //
 // Usage:
-//     ./gnumarus [--host H] [--port P] [--token TEXT] [--no-auth | --auth]
+//     ./GnumarusOSBridge [--host H] [--port P] [--token TEXT] [--no-auth | --auth]
 //
 // Settings resolve as: CLI flag > GNUMARUS_* env var > stdin key=value
 // lines > go/config.cfg (also checked next to the working dir and the
@@ -18,7 +18,7 @@ import (
 
 func usage() {
 	fmt.Fprintln(os.Stderr,
-		"Usage: ./gnumarus [--host HOST] [--port PORT] [--token TOKEN] [--no-auth | --auth]\n"+
+		"Usage: ./GnumarusOSBridge [--host HOST] [--port PORT] [--token TOKEN] [--no-auth | --auth]\n"+
 			"\nEvery setting can also come from a GNUMARUS_* environment variable\n"+
 			"(GNUMARUS_HOST/PORT/TOKEN/NO_AUTH), from stdin key=value lines, or from\n"+
 			"go/config.cfg. Precedence (highest first): CLI flag > env var >\n"+

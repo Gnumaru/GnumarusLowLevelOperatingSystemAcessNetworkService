@@ -93,6 +93,27 @@ class TestReadDir(unittest.TestCase):
         else:
             self.assertEqual(by_name["a.txt"]["crtime"], "null")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"),
+                         "Linux-only statx change-time check")
+    def test_ctime_matches_stat(self):
+        """ctime is the real inode-change time, not a zero placeholder.
+
+        The statx(2) call must ask for STATX_CTIME in its mask, else the
+        kernel leaves stx_ctime zeroed and the port reports 0.
+        """
+        target = os.path.join(self.ws, "b.bin")
+        status, _, data = get_json("/api/dir?path=" + quote(self.ws))
+        self.assertEqual(status, 200)
+        by_name = {e["name"]: e for e in data["entries"]}
+        proc = subprocess.run(["stat", "-c", "%Z", target],
+                              capture_output=True, text=True, timeout=10)
+        ctime = int(proc.stdout.strip())
+        self.assertGreater(ctime, 0)
+        value = tv(by_name["b.bin"]["ctime"])
+        self.assertIsInstance(value, (int, float))
+        self.assertAlmostEqual(value, ctime, delta=2)
+        self.assertNotEqual(value, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

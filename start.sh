@@ -21,7 +21,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage: ./start.sh --runtime <name> [server args...]
 
-<name> is one of: python, kotlin, php, ruby, nodejs, go, dotnet, rust
+<name> is one of: python, kotlin, php, ruby, nodejs, go, dotnet, rust, cpp
 The first "--runtime <name>" (or --runtime=<name>) selects the
 implementation; everything else is forwarded to the server verbatim
 (use --port <n> for the TCP port, --token <t>, etc.). stdin is passed
@@ -83,6 +83,7 @@ go_build="  ./go/build.sh       # needs network on first run (sqlite module)"
 dotnet_build="  ./dotnet/build.sh   # needs network on first run (NuGet restore)"
 rust_build="  ./rust/build.sh     # needs network on first run (crates.io)"
 ruby_build="  ./ruby/build.sh     # installs the sqlite3 gem into ruby/vendor (no root)"
+cpp_build="  ./cpp/build.sh       # needs cmake + ninja (vendored deps, no network)"
 
 LAUNCH=()
 case "$RUNTIME_NAME" in
@@ -90,11 +91,11 @@ case "$RUNTIME_NAME" in
         LAUNCH=(python3 python3/server.py)
         ;;
     kotlin)
-        if [ ! -x kotlin/build/install/gnumarus/bin/gnumarus ]; then
-            MISSING="kotlin/build/install/gnumarus/bin/gnumarus"
+        if [ ! -x kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge ]; then
+            MISSING="kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge"
             BUILD_HINT="$kotlin_build"
         else
-            LAUNCH=(kotlin/build/install/gnumarus/bin/gnumarus)
+            LAUNCH=(kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge)
         fi
         ;;
     php)
@@ -137,30 +138,38 @@ case "$RUNTIME_NAME" in
         fi
         ;;
     go)
-        if [ ! -x go/gnumarus ]; then
-            MISSING="go/gnumarus"
+        if [ ! -x go/GnumarusOSBridge ]; then
+            MISSING="go/GnumarusOSBridge"
             BUILD_HINT="$go_build"
         else
-            LAUNCH=(./go/gnumarus)
+            LAUNCH=(./go/GnumarusOSBridge)
         fi
         ;;
     dotnet)
         if ! command -v dotnet >/dev/null 2>&1; then
             MISSING="dotnet runtime (dotnet)"
             BUILD_HINT="  install the .NET SDK (then: $dotnet_build)"
-        elif [ ! -f dotnet/publish/gnumarus.dll ]; then
-            MISSING="dotnet/publish/gnumarus.dll"
+        elif [ ! -f dotnet/publish/GnumarusOSBridge.dll ]; then
+            MISSING="dotnet/publish/GnumarusOSBridge.dll"
             BUILD_HINT="$dotnet_build"
         else
-            LAUNCH=(dotnet dotnet/publish/gnumarus.dll)
+            LAUNCH=(dotnet dotnet/publish/GnumarusOSBridge.dll)
         fi
         ;;
     rust)
-        if [ ! -x rust/bin/gnumarus ]; then
-            MISSING="rust/bin/gnumarus"
+        if [ ! -x rust/bin/GnumarusOSBridge ]; then
+            MISSING="rust/bin/GnumarusOSBridge"
             BUILD_HINT="$rust_build"
         else
-            LAUNCH=(./rust/bin/gnumarus)
+            LAUNCH=(./rust/bin/GnumarusOSBridge)
+        fi
+        ;;
+    cpp)
+        if [ ! -x cpp/bin/GnumarusOSBridge ]; then
+            MISSING="cpp/bin/GnumarusOSBridge"
+            BUILD_HINT="$cpp_build"
+        else
+            LAUNCH=(./cpp/bin/GnumarusOSBridge)
         fi
         ;;
     *)

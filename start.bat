@@ -67,6 +67,7 @@ if "%RUNTIME_NAME%"=="nodejs" goto check_nodejs
 if "%RUNTIME_NAME%"=="go" goto check_go
 if "%RUNTIME_NAME%"=="dotnet" goto check_dotnet
 if "%RUNTIME_NAME%"=="rust" goto check_rust
+if "%RUNTIME_NAME%"=="cpp" goto check_cpp
 echo start.bat: unknown runtime '%RUNTIME_NAME%'>&2
 goto usage_exit
 
@@ -77,7 +78,7 @@ goto usage_exit
 :help
 echo Usage: start.bat --runtime ^<name^> [server args...]>&2
 echo.>&2
-echo ^<name^> is one of: python, kotlin, php, ruby, nodejs, go, dotnet, rust>&2
+echo ^<name^> is one of: python, kotlin, php, ruby, nodejs, go, dotnet, rust, cpp>&2
 echo Only the first "--runtime" selects the implementation (--runtime=name>&2
 echo also works); everything else is forwarded to the server verbatim.>&2
 echo Use --port ^<n^> for the TCP port, --token ^<t^> etc.;>&2
@@ -141,35 +142,45 @@ set "RUN=node nodejs\dist\server.js"
 goto run
 
 :check_go
-if exist "go\gnumarus.exe" goto run_go
-set "MISSING=go\gnumarus.exe"
-set "BUILD_HINT=  in go\: go build -o gnumarus ."
+if exist "go\GnumarusOSBridge.exe" goto run_go
+set "MISSING=go\GnumarusOSBridge.exe"
+set "BUILD_HINT=  in go\: go build -o GnumarusOSBridge ."
 goto fallback
 
 :run_go
-set "RUN=go\gnumarus.exe"
+set "RUN=go\GnumarusOSBridge.exe"
 goto run
 
 :check_dotnet
 where dotnet >nul 2>nul
 if errorlevel 1 goto no_dotnet
-if exist "dotnet\publish\gnumarus.dll" goto run_dotnet
-set "MISSING=dotnet\publish\gnumarus.dll"
+if exist "dotnet\publish\GnumarusOSBridge.dll" goto run_dotnet
+set "MISSING=dotnet\publish\GnumarusOSBridge.dll"
 set "BUILD_HINT=  in dotnet\: dotnet publish -c Release -o publish\"
 goto fallback
 
 :run_dotnet
-set "RUN=dotnet dotnet\publish\gnumarus.dll"
+set "RUN=dotnet dotnet\publish\GnumarusOSBridge.dll"
 goto run
 
 :check_rust
-if exist "rust\bin\gnumarus.exe" goto run_rust
-set "MISSING=rust\bin\gnumarus.exe"
-set "BUILD_HINT=  in rust\: cargo build --release, then copy target\release\gnumarus.exe to rust\bin\"
+if exist "rust\bin\GnumarusOSBridge.exe" goto run_rust
+set "MISSING=rust\bin\GnumarusOSBridge.exe"
+set "BUILD_HINT=  in rust\: cargo build --release, then copy target\release\GnumarusOSBridge.exe to rust\bin\"
 goto fallback
 
 :run_rust
-set "RUN=rust\bin\gnumarus.exe"
+set "RUN=rust\bin\GnumarusOSBridge.exe"
+goto run
+
+:check_cpp
+if exist "cpp\bin\GnumarusOSBridge.exe" goto run_cpp
+set "MISSING=cpp\bin\GnumarusOSBridge.exe"
+set "BUILD_HINT=  in cpp\: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release, then cmake --build build\"
+goto fallback
+
+:run_cpp
+set "RUN=cpp\bin\GnumarusOSBridge.exe"
 goto run
 
 :no_python

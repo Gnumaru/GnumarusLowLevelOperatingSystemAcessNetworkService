@@ -81,10 +81,10 @@ pub fn handle() -> Response {
     o.insert("machine".to_string(), jstr(std::env::consts::ARCH));
     o.insert("processor".to_string(), jstr(""));
     o.insert("hostname".to_string(), jstr(&hostname));
-    o.insert(
-        "rust_version".to_string(),
-        jstr(option_env!("RUSTC_VERSION").unwrap_or("unknown")),
-    );
+    // NOTE: no runtime-version field here. Managed runtimes report the
+    // version of the runtime that executes them (python_version,
+    // node_version, php_version, ruby_version, jvm_version,
+    // dotnet_version); native ones (Go, Rust, C++) do not report one.
     o.insert("cpu_count".to_string(), jstr(&format!("i:{cpu}")));
     o.insert("distro".to_string(), distro);
     o.insert("windows".to_string(), windows);

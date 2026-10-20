@@ -161,6 +161,9 @@ open CORS.
     docs, report.
 
 ## Iteration 8 (system info)
+    (NOTE: the runtime-version field became port-specific later - each
+    port reports its own runtime, native ones report none; see
+    Iteration 40.)
 29. `GET /api/sysinfo` (system_info, no params): `{ system,
     system_name, release, version, machine, processor, hostname,
     python_version, cpu_count, distro?, windows?, mac? }` via stdlib
@@ -234,7 +237,7 @@ open CORS.
     routes, token auth, CORS, multi-source config, shell with
     streaming caps, sysinfo, tilde, tagged scalars. Build config:
     target-dir ~/.rust_target_dirs/<PascalCase>/ + build.sh copies
-    the release binary to rust/bin/gnumarus.
+    the release binary to rust/bin/GnumarusOSBridge.
 45. Verified: shared suite 126/126 vs Rust, headless file:// smoke
     (Online, 12 endpoints). Parity bugs fixed: rusqlite named params
     need ":a" prefix (was 400 Invalid parameter name); config-cfg
@@ -282,7 +285,7 @@ open CORS.
     sqlite scan + sysinfo + routes). Native SQLite binding via C API
     (? + :named both native, no translation needed); scan kept only
     for single-statement + rows/write + placeholder-style checks.
-    Build ./cpp/build.sh (cmake build/ + copy to cpp/bin/gnumarus).
+    Build ./cpp/build.sh (cmake build/ + copy to cpp/bin/GnumarusOSBridge).
 51. Bugs found by the suite: feeder missing `off += n` (infinite
     stdin loop -> timeouts); SIGPIPE death on early-exit commands
     (now ignored at boot); nlohmann dump() throws on invalid UTF-8
@@ -304,6 +307,9 @@ open CORS.
     re-run), headless smoke, docs, report.
 
 ## Iteration 22 (start.sh launcher)
+    (NOTE: the selector was renamed to `--runtime <name>` later, see
+    the "Launcher flag rename" entry in CHECKLIST.md; `cpp` was added
+    afterwards too.)
 49. Root start.sh: first `--port <name>` selects
     (python/kotlin/php/nodejs/go/dotnet/rust, `--port=` too), rest
     forwarded verbatim (incl. server's own --port), stdin untouched
@@ -317,8 +323,10 @@ open CORS.
     only (pure Go, no cgo); everything else is stdlib (net/http,
     encoding/json, os/exec with Setpgid kill parity, crypto,
     node-style birthtime via raw statx syscall + manual decode).
-44. go/{go.mod,*.go} (package main), build `go build -o go/gnumarus
-    ./go`, run `go/gnumarus`. All 12 routes, token auth, CORS,
+44. go/{go.mod,*.go} (package main), build `go build -o
+    go/GnumarusOSBridge ./go`, run `go/GnumarusOSBridge` (the artifact
+    is named GnumarusOSBridge on every port). The same 24 routes as
+    every other port today, token auth, CORS,
     multi-source config (CWD -> exe dir), sysinfo, tilde, tagged
     scalars. SQLite via database/sql + modernc (fresh connection per
     request, real binding, DDL rowcount -1).
@@ -330,8 +338,9 @@ open CORS.
     only (HttpListener/JSON/FS/crypto all in shared framework).
     Probes first: HttpListener on Linux, File.GetCreationTimeUtc
     birth support, DllImport("libc") kill for process-group kill.
-44. dotnet/ console app (publish -> dotnet/publish/gnumarus.dll, run
-    `dotnet dotnet/publish/gnumarus.dll`): all 12 routes, token auth,
+44. dotnet/ console app (publish -> dotnet/publish/GnumarusOSBridge.dll,
+    run `dotnet dotnet/publish/GnumarusOSBridge.dll`): all 12 routes
+    (24 today), token auth,
     CORS, multi-source config (CWD -> exe dir), shell via
     setsid+bash with libc kill(-pid) (killpg parity), sysinfo,
     tilde, tagged scalars. SQLite via Microsoft.Data.Sqlite (fresh
@@ -384,12 +393,13 @@ open CORS.
 44. kotlin/src/main/kotlin/{Main,Config,Api}.kt: all 12 routes, token
     auth, CORS, multi-source config (CWD -> jar dir -> install root),
     shell with streaming caps, sysinfo, tilde expansion. Run:
-    kotlin/build/install/gnumarus/bin/gnumarus (same CLI flags).
+    kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge (same CLI flags).
 45. Parity bugs found by the shared suite and fixed: Gson 2.14 drops
     explicit JsonNull members (-> serializeNulls), Redirect.DISCARD
     is output-only (-> close PIPE stdin instead), config search missed
     installDist layout, python_version is null on JVM (test asserts
-    presence only). filemanager.html unchanged (same contract).
+    presence only; the field was later replaced by `jvm_version`, see
+    Iteration 40). filemanager.html unchanged (same contract).
 46. Verification: full Python suite vs Kotlin 123/123 OK (sqlite via
     JDBC, no sqlite3 CLI needed), vs Python 123/123 OK, headless
     file:// smoke vs Kotlin OK. Docs + report.
@@ -461,6 +471,12 @@ open CORS.
   less); "reference" means: protocol ambiguities resolve in Go's
   favor, `tests/run_all.py` runs the Go server by default, and new
   features land in Go first.
+- The build artifact of every port is named `GnumarusOSBridge`
+  (`go/GnumarusOSBridge`, `rust/bin/GnumarusOSBridge`,
+  `kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge`,
+  `dotnet/publish/GnumarusOSBridge.dll`,
+  `cpp/bin/GnumarusOSBridge`); the launchers, the test runner and the
+  docs all use those paths.
 
 ## Iteration 27 (loopback-only bind + Host allowlist)
 60. Scope (user): allowlist {127.0.0.1, localhost, ::1} (implemented
@@ -728,8 +744,8 @@ implementing.
 - Build: `GRADLE_USER_HOME=./tmp/gradle-home ./tmp/gradle-9.8.1/bin/gradle
   -p kotlin installDist -q`
 - Suite: `python3 tests/run_all.py --server-cmd
-  "kotlin/build/install/gnumarus/bin/gnumarus" --server-cfg
-  kotlin/build/install/gnumarus/config.cfg` (the install-root cfg is the
+  "kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge" --server-cfg
+  kotlin/build/install/GnumarusOSBridge/config.cfg` (the install-root cfg is the
   correct one; `kotlin/config.cfg` is not a server candidate).
 
 ## Iteration 36 (launcher flag: `--runtime` selects the implementation, `--port` is TCP-only)
@@ -886,3 +902,48 @@ implementing.
     `cpp/src/api.cpp` dispatch/check_auth/help and `cpp/src/routes.inc`.
 - Verified: `tests/test_oauth2.py` now passes (14/14) against both Rust
   and C++ ports with no skips.
+
+## Iteration 40 (contract alignment: artifact names, sysinfo, ctime, docs)
+- Goal: make every port, launcher, test and document agree on one
+  contract, after an audit of the Go reference against README.md,
+  FEATURES_DETAIL.md, FEATURES_SUMMARY.md, PLAN.md and CHECKLIST.md.
+- Build artifacts renamed to `GnumarusOSBridge` everywhere: Go already
+  built that name but every doc/launcher/test looked for `go/gnumarus`
+  (so `python3 tests/run_all.py` aborted with "default server ... is
+  missing" and `./start.sh --runtime go` silently fell back to Python).
+  Renamed: Rust (`[[bin]]` target), Kotlin (Gradle root project),
+  .NET (`AssemblyName`), C++ (CMake target); the launchers
+  (`start.sh`/`start.bat`/`start.ps1`), `tests/run_all.py` and
+  `tests/test_host.py` now use the new paths. The Kotlin build script
+  also picks a Gradle 7+ instead of whatever `gradle` is on PATH.
+- `cpp` added to `start.sh`, `start.bat` and `start.ps1` (the port
+  existed but was unreachable through the launchers).
+- `/api/sysinfo` runtime-version rule: the port reports the version of
+  the runtime that executes it and nothing else - `python_version`,
+  `node_version`, `php_version`, `ruby_version`, `jvm_version`,
+  `dotnet_version`. The native runtimes (Go, Rust, C++) report no
+  version field at all: `go_version`, `rust_version` and `cpp_version`
+  were removed (and Kotlin's `kotlin_version` with them, since it is a
+  language version, not a runtime one).
+- `ctime` bug in the Go reference: `go/statx.go` asked the kernel only
+  for `STATX_BTIME` (0x800) and then read `stx_ctime` anyway, so every
+  directory entry reported `ctime: f:0`. Fixed by requesting
+  `STATX_CTIME` (0x80) as well and by returning nil when the kernel
+  does not fill the field (so the mtime fallback applies). The same bug
+  existed in the Kotlin port (`linuxCtime`) and was fixed there too.
+- Help catalog: `delete_directory` now advertises the `shallow` query
+  parameter (default `0`, allowed `0`/`1`) and `delete_directory_shallow`
+  documents the aliases (`/api/shallow_dir`, `/api/dir_shallow`), on
+  all nine ports; the `system_info` response text documents the
+  runtime-version rule.
+- Tests: the suite grew to 241 tests and now asserts the exact
+  24-route catalog (not "at least"), the `shallow` parameter, the
+  single runtime-version field of `/api/sysinfo`, and that `ctime`
+  matches `stat -c %Z` (the regression gate for the statx mask bug).
+- Docs: README, FEATURES_SUMMARY, FEATURES_DETAIL, PLAN and CHECKLIST
+  updated (route counts 18/19/23 -> 24, test counts -> 241, artifact
+  names, sysinfo fields, PHP port no longer described as `php -S` +
+  `socketd.php`, launcher runtime list including `cpp`).
+- Verified: 241/241 on all nine ports (PHP skips the 21 SQLite tests
+  when pdo_sqlite is absent in the host); `start.sh --runtime <name>`
+  boots all nine (including the new `cpp`).

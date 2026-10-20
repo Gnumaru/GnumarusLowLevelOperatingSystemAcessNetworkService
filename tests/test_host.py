@@ -147,7 +147,7 @@ def server_cmd():
     if raw:
         import shlex
         return shlex.split(raw)
-    return [os.path.join(ROOT, "go", "gnumarus")]
+    return [os.path.join(ROOT, "go", "GnumarusOSBridge")]
 
 
 def spawn_host(host):

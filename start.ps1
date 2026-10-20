@@ -19,7 +19,7 @@ function Write-Stderr([string]$Text) {
 function Show-Usage {
     Write-Stderr 'Usage: start.ps1 --runtime <name> [server args...]'
     Write-Stderr ''
-    Write-Stderr '<name> is one of: python, kotlin, php, ruby, nodejs, go, dotnet, rust'
+    Write-Stderr '<name> is one of: python, kotlin, php, ruby, nodejs, go, dotnet, rust, cpp'
     Write-Stderr 'The first "--runtime <name>" (or --runtime=<name>) selects the'
     Write-Stderr 'implementation; everything else is forwarded to the server verbatim'
     Write-Stderr '(use --port <n> for the TCP port, --token <t>, etc.). stdin is'
@@ -94,11 +94,11 @@ switch ($runtimeName) {
         $exeArgs = @('python3/server.py')
     }
     'kotlin' {
-        if (-not (Test-Path 'kotlin/build/install/gnumarus/bin/gnumarus.bat')) {
-            $missing = 'kotlin\build\install\gnumarus\bin\gnumarus.bat'
+        if (-not (Test-Path 'kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge.bat')) {
+            $missing = 'kotlin\build\install\GnumarusOSBridge\bin\GnumarusOSBridge.bat'
             $hint = '  install Gradle, then run gradle installDist inside kotlin\'
         } else {
-            $exe = 'kotlin/build/install/gnumarus/bin/gnumarus.bat'
+            $exe = 'kotlin/build/install/GnumarusOSBridge/bin/GnumarusOSBridge.bat'
         }
     }
     'php' {
@@ -138,31 +138,39 @@ switch ($runtimeName) {
         }
     }
     'go' {
-        if (-not (Test-Path 'go/gnumarus.exe')) {
-            $missing = 'go\gnumarus.exe'
-            $hint = '  in go\: go build -o gnumarus .'
+        if (-not (Test-Path 'go/GnumarusOSBridge.exe')) {
+            $missing = 'go\GnumarusOSBridge.exe'
+            $hint = '  in go\: go build -o GnumarusOSBridge .'
         } else {
-            $exe = 'go/gnumarus.exe'
+            $exe = 'go/GnumarusOSBridge.exe'
         }
     }
     'dotnet' {
         if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
             Write-Stderr 'start.ps1: dotnet not found in PATH'
             exit 1
-        } elseif (-not (Test-Path 'dotnet/publish/gnumarus.dll')) {
-            $missing = 'dotnet\publish\gnumarus.dll'
+        } elseif (-not (Test-Path 'dotnet/publish/GnumarusOSBridge.dll')) {
+            $missing = 'dotnet\publish\GnumarusOSBridge.dll'
             $hint = '  in dotnet\: dotnet publish -c Release -o publish\'
         } else {
             $exe = 'dotnet'
-            $exeArgs = @('dotnet/publish/gnumarus.dll')
+            $exeArgs = @('dotnet/publish/GnumarusOSBridge.dll')
         }
     }
     'rust' {
-        if (-not (Test-Path 'rust/bin/gnumarus.exe')) {
-            $missing = 'rust\bin\gnumarus.exe'
-            $hint = '  in rust\: cargo build --release, then copy target\release\gnumarus.exe to rust\bin\'
+        if (-not (Test-Path 'rust/bin/GnumarusOSBridge.exe')) {
+            $missing = 'rust\bin\GnumarusOSBridge.exe'
+            $hint = '  in rust\: cargo build --release, then copy target\release\GnumarusOSBridge.exe to rust\bin\'
         } else {
-            $exe = 'rust/bin/gnumarus.exe'
+            $exe = 'rust/bin/GnumarusOSBridge.exe'
+        }
+    }
+    'cpp' {
+        if (-not (Test-Path 'cpp/bin/GnumarusOSBridge.exe')) {
+            $missing = 'cpp\bin\GnumarusOSBridge.exe'
+            $hint = '  in cpp\: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release, then cmake --build build\'
+        } else {
+            $exe = 'cpp/bin/GnumarusOSBridge.exe'
         }
     }
     default {

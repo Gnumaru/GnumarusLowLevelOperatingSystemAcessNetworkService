@@ -145,11 +145,14 @@ fun buildRoutes(): JsonArray {
     r.add(routeEntry("DELETE", "/api/dir?path=<path>", "delete_directory",
         "Delete an empty directory (rmdir equivalent). Fails when the directory is not empty.",
         listOf(param("path", "query", true, "string",
-            "Absolute or relative path of the empty directory to delete. ~/ expands to the server user's home directory.")),
+            "Absolute or relative path of the empty directory to delete. ~/ expands to the server user's home directory."),
+            param("shallow", "query", false, "string",
+                "If '1', delete a shallow directory instead (same as DELETE /api/dir/shallow): files, symlinks and empty subdirectories only, never recursive.",
+                "0", listOf("0", "1"))),
         "200 JSON { path, absolute_path, deleted: true }.",
         "400 missing path / not-a-directory / not-empty, 404 not found, 403 forbidden."))
     r.add(routeEntry("DELETE", "/api/dir/shallow?path=<path>", "delete_directory_shallow",
-        "Delete a shallow directory: a directory containing only files (including symlinks) and empty subdirectories. Fails when it contains a non-empty real subdirectory. Does not delete recursively.",
+        "Delete a shallow directory: a directory containing only files (including symlinks) and empty subdirectories. Fails when it contains a non-empty real subdirectory. Does not delete recursively. Also reachable as DELETE /api/dir?shallow=1 and under the path aliases /api/shallow_dir and /api/dir_shallow.",
         listOf(param("path", "query", true, "string",
             "Absolute or relative path of the shallow directory to delete. ~/ expands to the server user's home directory.")),
         "200 JSON { path, absolute_path, deleted: true }.",
@@ -278,7 +281,7 @@ fun buildRoutes(): JsonArray {
     r.add(routeEntry("GET", "/api/sysinfo", "system_info",
         "Return operating-system information about the host running the server. Takes no parameters.",
         listOf(),
-        "200 JSON { system, system_name, release, version, machine, processor, hostname, cpu_count, distro, windows, mac }. system is the raw platform name (Linux/Windows/Darwin); system_name is the friendly one (Darwin -> macOS). distro is parsed from /etc/os-release on Linux and null elsewhere; windows/mac objects appear only on those systems.",
+        "200 JSON { system, system_name, release, version, machine, processor, hostname, cpu_count, distro, windows, mac }. system is the raw platform name (Linux/Windows/Darwin); system_name is the friendly one (Darwin -> macOS). distro is parsed from /etc/os-release on Linux and null elsewhere; windows/mac objects appear only on those systems. Managed runtimes add their own runtime-version field (python_version, node_version, php_version, ruby_version, jvm_version, dotnet_version); native runtimes (Go, Rust, C++) report no version field.",
         "401 missing/invalid token, 405 wrong method."))
     r.add(routeEntry("GET", "/", "index",
         "Service index with version and pointer to /api/help.",
@@ -485,6 +488,9 @@ open class StatxBuf : com.sun.jna.Structure() {
     @JvmField var spare2: LongArray = LongArray(14)
 }
 
+/** statx request-mask bits (uapi/linux/stat.h). */
+private const val STATX_CTIME = 0x80
+
 val statxLib: StatxLib? by lazy {
     if (!IS_LINUX) null else try {
         com.sun.jna.Native.load("c", StatxLib::class.java)
@@ -498,8 +504,12 @@ fun linuxCtime(path: String): Double? {
     val libc = statxLib ?: return null
     return try {
         val buf = StatxBuf()
-        val ret = libc.statx(-100, path, 0x100, 0x800, buf)
+        // statx request mask (uapi/linux/stat.h): the kernel only fills
+        // the timestamps whose bit is present in the mask. STATX_CTIME
+        // is 0x80, STATX_BTIME is 0x800.
+        val ret = libc.statx(-100, path, 0x100, STATX_CTIME, buf)
         if (ret != 0) return null
+        if ((buf.stx_mask and STATX_CTIME) == 0) return null
         buf.stx_ctime.tv_sec + buf.stx_ctime.tv_nsec / 1e9
     } catch (e: Exception) {
         null
@@ -2687,8 +2697,10 @@ class ApiHandler(val authRequired: Boolean, val authToken: String) {
             "machine" to System.getProperty("os.arch", ""),
             "processor" to "",
             "hostname" to hostname,
+            // Managed runtimes report the version of the runtime that
+            // executes them (jvm_version here); native ones (Go, Rust,
+            // C++) report no version field at all.
             "jvm_version" to System.getProperty("java.version", ""),
-            "kotlin_version" to KotlinVersion.CURRENT.toString(),
             "cpu_count" to jenc(Runtime.getRuntime().availableProcessors().toLong()),
             "distro" to distro, "windows" to windows, "mac" to mac))
     }

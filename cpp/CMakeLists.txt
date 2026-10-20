@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
-project(gnumarus VERSION 0.10.0 LANGUAGES C CXX)
+project(GnumarusOSBridge VERSION 0.10.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(gnumarus
+add_executable(GnumarusOSBridge
     src/main.cpp
     src/config.cpp
     src/tags.cpp
@@ -18,9 +18,9 @@ add_executable(gnumarus
 )
 
 find_package(OpenSSL REQUIRED)
-target_link_libraries(gnumarus PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(GnumarusOSBridge PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 
-target_include_directories(gnumarus PRIVATE
+target_include_directories(GnumarusOSBridge PRIVATE
     src
     third_party
     third_party/sqlite
@@ -30,7 +30,7 @@ target_include_directories(gnumarus PRIVATE
 set_source_files_properties(third_party/sqlite/sqlite3.c PROPERTIES
     COMPILE_OPTIONS "-w;-DSQLITE_THREADSAFE=1"
 )
-target_compile_options(gnumarus PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(GnumarusOSBridge PRIVATE -Wall -Wextra -Wpedantic)
 
 find_package(Threads REQUIRED)
-target_link_libraries(gnumarus PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(GnumarusOSBridge PRIVATE Threads::Threads ${CMAKE_DL_LIBS})

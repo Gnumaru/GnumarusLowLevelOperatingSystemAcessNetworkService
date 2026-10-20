@@ -11,12 +11,15 @@ import (
 // unsafe, no cgo). struct statx has a fixed 256-byte layout; anything
 // else means our offsets are wrong for this platform -> disabled.
 const (
-	statxBTIME = 0x800
+	// statx request mask bits (uapi/linux/stat.h): the kernel only
+	// fills the timestamps whose bit is present in the mask.
+	statxCTIME    = 0x80
+	statxBTIME    = 0x800
 	statxNoFollow = 0x100
 	// struct statx field offsets (bytes)
-	offMask  = 0
-	offBtime = 80
-	offCtime = 96
+	offMask   = 0
+	offBtime  = 80
+	offCtime  = 96
 	statxSize = 256
 )
 
@@ -44,14 +47,16 @@ func StatxTimes(path string) (ctime, btime *float64) {
 	// #nosec G103 -- raw syscall with a fixed-size buffer, bounds known.
 	r1, _, errno := syscall.Syscall6(statxNumber(),
 		uintptr(atFDCWD), uintptr(unsafe.Pointer(p)),
-		uintptr(statxNoFollow), uintptr(statxBTIME),
+		uintptr(statxNoFollow), uintptr(statxCTIME|statxBTIME),
 		uintptr(unsafe.Pointer(&buf[0])), 0)
 	if r1 != 0 || errno != 0 {
 		return nil, nil
 	}
 	mask := binary.LittleEndian.Uint32(buf[offMask:])
-	ct := tsToFloat(buf[offCtime : offCtime+16 : offCtime+16])
-	ctime = &ct
+	if mask&statxCTIME != 0 {
+		ct := tsToFloat(buf[offCtime : offCtime+16 : offCtime+16])
+		ctime = &ct
+	}
 	if mask&statxBTIME != 0 {
 		bt := tsToFloat(buf[offBtime : offBtime+16 : offBtime+16])
 		btime = &bt
